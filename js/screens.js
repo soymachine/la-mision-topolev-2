@@ -304,7 +304,7 @@ const Panel = {
       Term.text(sx, cy, altS + (st.pendingAlt ? (blink(0.5) ? ' ⇅' : '  ') : ''), P.alt ? COL.white : COL.o2);
       cy++;
     }
-    Term.rich(x + 2, cy, `{m}MASA{/} ${S.mass}  {m}EMPUJE{/} ${S.thrust.toFixed(1)}  {m}VMÁX{/} ${S.maxS}  {m}GIRO{/} ±${S.man * 45}°`, COL.cream);
+    Term.rich(x + 2, cy, `{m}MASA{/} ${S.mass}  {m}EMPUJE{/} ${S.thrust.toFixed(1)}  {m}VMÁX{/} ${S.maxS}  {m}GIRO{/} ±${S.turnMax * 45}°`, COL.cream);
     cy++;
     if (mode === 'hangar') { Term.rich(x + 2, cy, `{m}CONSUMO{/} ${G.fuelUse(S, Math.max(1, S.maxS - 1), 1).toFixed(2)}/t  {m}VISIÓN{/} ${12 + S.vision}  {m}INTERF.{/} ${S.ecm}`, COL.cream); cy++; }
 
@@ -453,8 +453,7 @@ const Flight = {
     this.drawActionBar(L, S);
     this.drawLog(L, S);
     UI.disabled = !!modal || st.phase === 'dead' || st.phase === 'won';
-    const end = Panel.draw(L.side.x, L.side.y, L.side.w, L.side.h, 'flight');
-    this.drawSideButtons(L, end, S);
+    Cockpit.draw(L.side.x, L.side.y, L.side.w, L.side.h, dt);
     UI.disabled = false;
     if (this.panning) UI.cursor = 'grabbing';
 
@@ -532,12 +531,9 @@ const Flight = {
     const ac = st.alert >= 75 ? (blink(0.5) ? COL.red : COL.dred) : st.alert >= 50 ? COL.red : st.alert >= 25 ? COL.o1 : COL.o3;
     Term.bar(x, 0, 10, st.alert / 100, ac, COL.o5, COL.o6); x += 11;
     x += Term.text(x, 0, `${Math.round(st.alert)}%`, ac, COL.o6) + 1; sep();
-    const ph = G.dayPhase();
-    const phIcon = ph === 'noche' ? '☾' : ph === 'día' ? '☼' : '◐';
-    seg(`${phIcon} ${G.clockStr()} ${ph.toUpperCase()}`, ph === 'noche' ? COL.storm : COL.o3); sep();
-    if (st.wind) seg(`VIENTO ${ARROWS[st.wind.d]}${'≈'.repeat(st.wind.s)}`, COL.o3);
+    seg(`PUNTOS ${st.score}`, COL.o4);
     if (C - menuW - 1 > x) UI.button(C - menuW - 1, 0, 'MENÚ', { w: menuW, col: COL.o2, bg: COL.o6, onClick: () => { this.pause = true; } });
-    if (st.wind && UI.hit(x - 12, 0, 12, 1)) UI.tip = { title: 'VIENTO', lines: [`Sopla hacia el ${DIRN[st.wind.d]}, fuerza ${st.wind.s}.`, `Volar a favor ahorra hasta un ${st.wind.s * 8}% de combustible;`, 'volar en contra cuesta lo mismo de más.', 'Arrastra las tormentas.'] };
+
   },
 
   drawMap(L, S) {
@@ -702,6 +698,7 @@ const Flight = {
     const thrTxt = o.glide ? 'planeo (sin empuje)' : o.ns > P.s ? 'acelerar' : o.ns < P.s ? (Math.abs(o.turn) >= 2 && o.thr >= 0 ? 'viraje cerrado (−1)' : 'desacelerar') : 'velocidad constante';
     L.push(`${turnTxt} · ${thrTxt}`);
     L.push(`Rumbo {w}${ARROWS[o.nh]} ${DIRN[o.nh]}{/}   Velocidad {w}${o.ns}{/}`);
+    L.push(`Giro posible el turno siguiente: {w}±${G.turnSteps(o.ns, S) * 45}°{/}`);
     const alt = st.pendingAlt ? 1 - P.alt : P.alt;
     L.push(`Consumo estimado {y}${G.fuelUse(S, o.ns, alt).toFixed(1)}{/}`);
     const map = st.map;
@@ -779,7 +776,7 @@ const Flight = {
       const col = age > 3 ? dimc(m.col, 0.6) : m.col;
       Term.text(x + 2, y + 2 + j + (h - 4 - lines.length), (age === 0 ? '› ' : '  ') + m.text, col, COL.panel, w - 4);
     });
-    Term.rich(x + 2, y + h - 1, ' {w}←→{/} girar {w}↑↓{/} acel. {w}ESPACIO{/} ejecutar {w}X{/} altitud {w}E{/} evasiva {w}B{/} bengala {w}R{/} kit {w}TAB{/} objetivo {w}F{/} fuego {w}Z{/} zoom {w}C{/} centrar {w}M{/} mapa ', COL.o3, COL.panel, w - 4);
+    Term.rich(x + 2, y + h - 1, ' {w}←→{/} girar {w}↑↓{/} acel. {w}ESPACIO{/} ejecutar {w}X{/} altitud {w}E{/} evasiva {w}B{/} bengala {w}R{/} kit {w}V{/} radiador {w}1-3{/} energía {w}TAB{/} objetivo {w}F{/} fuego {w}Z{/} zoom {w}C{/} centrar ', COL.o3, COL.panel, w - 4);
   },
 
   drawSideButtons(L, cy, S) {
@@ -1037,8 +1034,8 @@ const Flight = {
     if (kl === 'c') { this.center(); return; }
     if (st.phase !== 'flight') return;
     const S = G.calc();
-    if (k === 'ArrowLeft' || kl === 'a') { st.pTurn = Math.max(-S.man, st.pTurn - 1); Sound.play('hover'); }
-    else if (k === 'ArrowRight' || kl === 'd') { st.pTurn = Math.min(S.man, st.pTurn + 1); Sound.play('hover'); }
+    if (k === 'ArrowLeft' || kl === 'a') { st.pTurn = Math.max(-S.turnMax, st.pTurn - 1); Sound.play('hover'); }
+    else if (k === 'ArrowRight' || kl === 'd') { st.pTurn = Math.min(S.turnMax, st.pTurn + 1); Sound.play('hover'); }
     else if (k === 'ArrowUp' || kl === 'w') { st.pThr = Math.min(1, st.pThr + 1); Sound.play('hover'); }
     else if (k === 'ArrowDown' || kl === 's') { st.pThr = Math.max(-1, st.pThr - 1); Sound.play('hover'); }
     else if (k === ' ' || k === 'Enter') G.doTurn(G.pendingOption());
@@ -1047,6 +1044,10 @@ const Flight = {
     else if (kl === 'f') this.toggleFire();
     else if (kl === 'm') this.showMap = true;
     else if (kl === 'e') G.toggleEvade();
+    else if (kl === 'v') G.toggleRadiator();
+    else if (k === '1') G.cyclePower('mot');
+    else if (k === '2') G.cyclePower('arm');
+    else if (k === '3') G.cyclePower('sis');
     else if (kl === 'b') G.useFlare();
     else if (kl === 'r') G.useKit();
   },

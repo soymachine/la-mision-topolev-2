@@ -27,6 +27,8 @@ Las instrucciones completas están dentro del juego, en **INSTRUCCIONES**.
 | `Z` / rueda del ratón | zoom ×1 / ×2 |
 | botón central (o arrastrar en vacío) | desplazar el mapa |
 | `C` | volver a centrar la cámara en el T-0 |
+| `V` | abrir / cerrar el radiador |
+| `1` `2` `3` | energía de los buses MOT / ARM / SIS |
 | `TAB` / clic en un enemigo | marcar objetivo |
 | `F` | fuego automático / retener |
 | `M` | mapa del sector |

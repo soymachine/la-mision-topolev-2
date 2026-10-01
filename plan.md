@@ -114,15 +114,15 @@
 - [x] 11.11 Instrucciones actualizadas, migración de partidas guardadas, pruebas
 
 ## Fase 12 — Cabina e instrumentos (iteración 3)
-- [ ] 12.1 Giro dependiente de la velocidad (vel 1: 135°, vel 2: 90°, vel ≥3: 45°; alerones +45°): permite volver hacia el oeste
-- [ ] 12.2 Distribución de energía del generador (MOT/ARM/SIS) con efectos en empuje, consumo, precisión y sistemas
-- [ ] 12.3 Temperatura de motores y radiador (abrir enfría pero consume); sobrecalentamiento daña motores
-- [ ] 12.4 Hielo en altitud alta (noche, tormentas, sectores fríos): masa, giro y velocidad; deshielo
-- [ ] 12.5 Panel de cabina compacto: brújula de cinta con marcadores, estado de vuelo, barras, consumo/autonomía
-- [ ] 12.6 Pantalla de radar con barrido, blips clicables, pista y fragmentos
-- [ ] 12.7 Horizonte artificial reactivo al giro y altitud programados
-- [ ] 12.8 Módulos en rejilla de 2 columnas y bodega en fichas (drag & drop, clic derecho)
-- [ ] 12.9 Teclas (V radiador, 1/2/3 energía), tooltips de instrumentos, instrucciones, migración, pruebas
+- [x] 12.1 Giro dependiente de la velocidad (vel 1: 135°, vel 2: 90°, vel ≥3: 45°; alerones +45°): permite volver hacia el oeste
+- [x] 12.2 Distribución de energía del generador (MOT/ARM/SIS) con efectos en empuje, consumo, precisión y sistemas
+- [x] 12.3 Temperatura de motores y radiador (abrir enfría pero consume); sobrecalentamiento daña motores
+- [x] 12.4 Hielo en altitud alta (noche, tormentas, sectores fríos): masa, giro y velocidad; deshielo
+- [x] 12.5 Panel de cabina compacto: brújula de cinta con marcadores, estado de vuelo, barras, consumo/autonomía
+- [x] 12.6 Pantalla de radar con barrido, blips clicables, pista y fragmentos
+- [x] 12.7 Horizonte artificial reactivo al giro y altitud programados
+- [x] 12.8 Módulos en rejilla de 2 columnas y bodega en fichas (drag & drop, clic derecho)
+- [x] 12.9 Teclas (V radiador, 1/2/3 energía), tooltips de instrumentos, instrucciones, migración, pruebas
 
 ## Ideas futuras (no imprescindibles)
 - [ ] Música ambiental generativa

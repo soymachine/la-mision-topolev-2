@@ -68,31 +68,31 @@ const SECTORS = [
     name: 'Taiga de Tomsk', field: 'Aeródromo de Kolpashevo',
     desc: 'Bosque infinito y ríos helados. La Dirección K apenas tiene presencia aquí: algunos exploradores y cazas ligeros. Buen lugar para aprender a volar el T-0.',
     forest: 0.58, mtn: 0.0, water: 0.10, rivers: 1, cities: 1, citySize: 1, radars: 1, aa: 1, wrecks: 6, frags: 5, depots: 3,
-    sams: 0, storms: 1, anom: 0, patrols: 1, pool: [['scout', 3], ['yak', 3]], maxE: 3,
+    sams: 0, storms: 1, anom: 0, patrols: 1, pool: [['scout', 3], ['yak', 3]], maxE: 3, cold: 0.5,
   },
   {
     name: 'Llanura del Yeniséi', field: 'Aeródromo de Yeniseisk',
     desc: 'Llanura abierta: poca cobertura y radares en cada colina. Los primeros MiG de la Dirección K han sido avistados.',
     forest: 0.32, mtn: 0.02, water: 0.16, rivers: 2, cities: 2, citySize: 1, radars: 2, aa: 3, wrecks: 6, frags: 6, depots: 3,
-    sams: 0, storms: 2, anom: 0, patrols: 2, pool: [['scout', 2], ['yak', 4], ['mig', 1]], maxE: 4,
+    sams: 0, storms: 2, anom: 0, patrols: 2, pool: [['scout', 2], ['yak', 4], ['mig', 1]], maxE: 4, cold: 0.7,
   },
   {
     name: 'Meseta de Putorana', field: 'Base aérea de Tura',
     desc: 'Mesetas basálticas y cañones profundos. Volar bajo es arriesgado entre tantas montañas, pero volar alto te expone a los radares.',
     forest: 0.22, mtn: 0.13, water: 0.10, rivers: 1, cities: 1, citySize: 1, radars: 2, aa: 4, wrecks: 7, frags: 7, depots: 3,
-    sams: 1, storms: 3, anom: 0, patrols: 2, pool: [['yak', 3], ['mig', 2], ['heavy', 1]], maxE: 4,
+    sams: 1, storms: 3, anom: 0, patrols: 2, pool: [['yak', 3], ['mig', 2], ['heavy', 1]], maxE: 4, cold: 1.2,
   },
   {
     name: 'Krasnoyarsk-26', field: 'Pista secreta de Vanavara',
     desc: 'Ciudad cerrada. No figura en ningún mapa. Fábricas, antiaéreos y el cuartel general de la Dirección K. Las primeras anomalías aparecen en el cielo.',
     forest: 0.26, mtn: 0.03, water: 0.08, rivers: 1, cities: 4, citySize: 2, radars: 4, aa: 7, wrecks: 7, frags: 7, depots: 3,
-    sams: 2, storms: 2, anom: 3, patrols: 3, pool: [['yak', 2], ['mig', 3], ['heavy', 2]], maxE: 5,
+    sams: 2, storms: 2, anom: 3, patrols: 3, pool: [['yak', 2], ['mig', 3], ['heavy', 2]], maxE: 5, cold: 0.6,
   },
   {
     name: 'Epicentro de Tunguska', field: 'Pista de evacuación «Rassvet»',
     desc: 'Árboles abatidos en círculos perfectos. El aire vibra. En el centro espera el Núcleo... y los Ecos que lo protegen. Sin el Núcleo no hay aterrizaje.',
     forest: 0.5, mtn: 0.03, water: 0.08, rivers: 1, cities: 0, citySize: 1, radars: 2, aa: 4, wrecks: 8, frags: 9, depots: 3,
-    sams: 2, storms: 3, anom: 12, patrols: 3, pool: [['mig', 2], ['eco', 4], ['heavy', 1]], maxE: 6, nucleo: true,
+    sams: 2, storms: 3, anom: 12, patrols: 3, pool: [['mig', 2], ['eco', 4], ['heavy', 1]], maxE: 6, cold: 0.9, nucleo: true,
   },
 ];
 
@@ -181,6 +181,12 @@ const CONSUMABLES = {
   kits: { n: 'Kits de reparación', g: '+', price: 12, d: 'Reparación de emergencia: +20 de estructura y +12 al módulo más dañado. No cuesta turno.' },
 };
 
+// energía del generador por bus (0..4 puntos)
+const PWR = {
+  motT: [0.7, 0.85, 1, 1.12, 1.24], motC: [0.85, 0.92, 1, 1.1, 1.22], motH: [0.6, 0.8, 1, 1.25, 1.5],
+  armA: [0, -15, 0, 8, 15], sis: [0, 0.5, 1, 1.25, 1.5],
+};
+
 const SYSN = {
   vision: 'Visión', detect: 'Detección radar', ecm: 'Interferencia', man: 'Maniobra', grab: 'Garfio (vel. recogida)',
   aim: 'Puntería', reso: 'Resonancia', repair: 'Reparación/turno', stealth: 'Sigilo %', burner: 'Velocidad máx.',
@@ -258,6 +264,7 @@ const INSTR = [
     '  {w}ESPACIO / ENTER{/}  ejecutar la maniobra programada',
     '  {w}X{/}  cambiar de altitud      {w}TAB{/}  siguiente objetivo      {w}F{/}  fuego auto / retener',
     '  {w}E{/}  evasiva (tonel)         {w}B{/}  bengalas                 {w}R{/}  kit de reparación',
+    '  {w}V{/}  radiador                {w}1 2 3{/}  energía MOT / ARM / SIS',
     '  {w}Z{/}  zoom ×1 / ×2            {w}C{/}  centrar la cámara        {w}M{/}  mapa del sector',
     '  {w}ESC{/}  menú                  {w}+ / −{/}  tamaño de letra',
     '',
@@ -269,8 +276,10 @@ const INSTR = [
     'En el mapa verás los {b}destinos posibles{/} de este turno. Pasa el ratón por encima para ver la',
     'trayectoria y haz {w}clic{/} para ejecutarla directamente.',
     '',
-    '{y}MANIOBRA{/}: por defecto puedes girar 45° por turno. Con {b}alerones{/} puedes girar 90°, pero un',
-    'viraje cerrado de 90° cuesta 1 punto de velocidad.',
+    '{y}MANIOBRA{/}: cuanto más lento vuelas, más cerrado puedes girar en un turno:',
+    '   {w}velocidad 1: hasta 135°     velocidad 2: hasta 90°     velocidad 3 o más: 45°{/}',
+    'Cada módulo de {b}alerones{/} añade 45° (hasta 180°: media vuelta). Un viraje de 90° o más cuesta',
+    '1 punto de velocidad. Para volver hacia el oeste: frena y gira cerrado.',
     '',
     '{y}VELOCIDAD MÁXIMA{/}: depende de la relación {b}empuje / masa{/}. Cada módulo, cada pieza en la bodega',
     'y el propio combustible pesan. Un avión sobrecargado es un avión lento.',
@@ -316,6 +325,27 @@ const INSTR = [
     '',
     '{y}TIERRA{/}: radares y antiaéreos se atacan con {b}bombas{/} (alcance 1) o con cualquier arma',
     'volando en altitud baja.',
+  ]],
+  ['CABINA', [
+    'El panel derecho es la cabina del T-0. Pasa el ratón por cualquier instrumento para ver qué indica.',
+    '',
+    '{y}BRÚJULA{/}: cinta de rumbo con marcadores: {y}P{/} pista, {c}◉{/} Núcleo, {s}≈{/} viento, {r}•{/} contactos, {y}◆{/} objetivo.',
+    '{y}RADAR{/}: pantalla con barrido. Necesita un módulo de radar y energía en SIS. Clic en un eco = objetivo.',
+    '{y}HORIZONTE ARTIFICIAL{/}: se inclina con el giro programado y cabecea con el cambio de altitud.',
+    '',
+    '{y}ENERGÍA{/} (teclas {w}1 2 3{/} o clic en los cuadros): el generador da 2 unidades + 2 por motor sano.',
+    'Repártelas entre tres buses (0 a 4 cada uno):',
+    '  {o}MOT{/}: empuje, consumo y calor de los motores.    {r}ARM{/}: precisión (a 0 no disparas).',
+    '  {c}SIS{/}: radar, interferidor, mira, resonador, sigilo y reparación. Con 3 o más, deshielo.',
+    'Si pierdes un motor, el generador cae y la energía se recorta sola.',
+    '',
+    '{y}TEMPERATURA{/}: volar rápido y con mucha energía en MOT calienta los motores. A 85° entras en zona',
+    'amarilla; por encima de 90° pierdes empuje y por encima de 100° los motores se dañan cada turno.',
+    '{w}V{/} abre o cierra el {y}RADIADOR{/}: enfría casi el doble, pero aumenta el consumo un 8%.',
+    '',
+    '{y}HIELO{/}: se forma volando ALTO, sobre todo de noche, en tormentas y en sectores fríos. Con 30%',
+    'pesa, con 60% pierdes 45° de giro y con 90% un punto de velocidad. Se quita volando BAJO, con los',
+    'motores calientes o con el deshielo eléctrico (SIS ≥ 3).',
   ]],
   ['TÁCTICAS', [
     '{y}TONEL EVASIVO{/} ({w}E{/}): programa una maniobra evasiva para el próximo turno. Los enemigos',
@@ -423,6 +453,8 @@ const INSTR = [
     '· Una bengala a tiempo vale más que diez puntos de blindaje.',
     '· Planifica la ruta con el viento: a favor llegas más lejos con el mismo combustible.',
     '· Repara antes de que un módulo entre en avería: los fallos se encadenan.',
+    '· En combate, pasa energía de SIS a ARM. Para cruzar, de ARM a MOT. Para esconderte, a SIS.',
+    '· Abre el radiador antes de esprintar, no cuando ya estás en rojo.',
     '· El combustible manda. Mira el indicador de la pista y calcula.',
     '· En el epicentro, los Ecos drenan combustible. Entra con los tanques llenos.',
   ]],

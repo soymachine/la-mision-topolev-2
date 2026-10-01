@@ -14,10 +14,11 @@ const G = {
       pTurn: 0, pThr: 0, log: [], phase: 'briefing', hangar: null, cause: '', hints: {},
       perks: [], items: { flares: 2, kits: 1 }, clock: 7.5, wind: { d: 2, s: 1 }, evadeCd: 0, pendingEvade: false,
       evading: false, flare: 0, blind: 0, event: null, sec: null, contract: null, kitTurn: -1,
+      power: { mot: 2, arm: 2, sis: 2 }, bank: 0,
       stats: { frags: 0, dmgTaken: 0, shots: 0, hits: 0, ground: 0, modsLost: 0 },
     };
     st.plane = {
-      x: 0, y: 0, h: 2, s: 2, alt: 1, structure: 100, maxStructure: 100, fuel: 0,
+      x: 0, y: 0, h: 2, s: 2, alt: 1, structure: 100, maxStructure: 100, fuel: 0, temp: 45, ice: 0, radOpen: false,
       slots: new Array(SLOTS.length).fill(null), cargo: new Array(CARGO_SIZE).fill(null),
     };
     const R = this.R, P = st.plane;
@@ -48,6 +49,10 @@ const G = {
     const d = { perks: [], items: { flares: 2, kits: 1 }, clock: 7.5, wind: { d: 2, s: 1 }, evadeCd: 0, pendingEvade: false, evading: false, flare: 0, blind: 0, event: null, contract: null, kitTurn: -1 };
     for (const k in d) if (st[k] === undefined) st[k] = d[k];
     if (!st.sec) st.sec = { kills: 0, radars: 0, sams: 0, frags: 0, mods: 0, events: 0 };
+    if (!st.power) st.power = { mot: 2, arm: 2, sis: 2 };
+    if (st.bank == null) st.bank = 0;
+    const P = st.plane;
+    if (P) { if (P.temp == null) P.temp = 45; if (P.ice == null) P.ice = 0; if (P.radOpen == null) P.radOpen = false; }
     if (st.map) for (const k in st.map.ground) if (st.map.ground[k].cd == null) st.map.ground[k].cd = 0;
   },
 
@@ -70,6 +75,7 @@ const G = {
     st.sec = { kills: 0, radars: 0, sams: 0, frags: 0, mods: 0, events: 0 };
     st.event = null; st.blind = 0; st.flare = 0; st.evading = false; st.pendingEvade = false; st.evadeCd = 0;
     st.contract = this.genContract();
+    P.temp = 45; P.ice = 0; P.radOpen = false; st.bank = 0;
     for (let k = 0; k < def.patrols; k++) this.spawnEnemy(this.R.weighted(def.pool), 'patrol');
     this.reveal();
     st.phase = 'briefing';
@@ -102,18 +108,28 @@ const G = {
       stealth: 0, burner: 0, grab: 0, engines: 0, weapons: 0, armor: 0, fountain: 0, regen: 0,
     };
     const st = this.st, has = k => st.perks && st.perks.includes(k);
-    s.leak = 0; s.crit = 0;
+    const pw = st.power || { mot: 2, arm: 2, sis: 2 };
+    s.leak = 0; s.crit = 0; s.gen = 2; s.radar = false;
     P.slots.forEach((m, i) => {
       if (!m) return;
       s.mass += m.mass;
       const crit = isCrit(m);
       if (crit) s.crit++;
-      if (m.cat === 'motor') { s.thrust += m.thrust * (crit ? 0.6 : 1); s.cons += m.cons; s.engines++; }
+      if (m.cat === 'motor') { s.thrust += m.thrust * (crit ? 0.6 : 1); s.cons += m.cons; s.engines++; s.gen += crit ? 1 : 2; }
       else if (m.cat === 'tanque') { s.fuelCap += m.cap; if (m.anom === 'fuente') s.fountain += 0.6; if (crit) s.leak += 0.5; }
       else if (m.cat === 'arma') s.weapons++;
       else if (m.cat === 'blindaje') { s.armor++; if (m.anom === 'regen') s.regen++; }
-      else if (m.cat === 'sistema' && !crit && !(st.blind > 0 && m.kind === 'radar')) for (const k in m.sys) s[k] = (s[k] || 0) + m.sys[k];
+      else if (m.cat === 'sistema' && !crit && !(st.blind > 0 && m.kind === 'radar')) { for (const k in m.sys) s[k] = (s[k] || 0) + m.sys[k]; if (m.sys.detect) s.radar = true; }
     });
+    // energía: el bus de sistemas escala sensores, contramedidas y reparación
+    const sm = PWR.sis[pw.sis];
+    for (const k of ['vision', 'detect', 'ecm', 'aim', 'reso', 'stealth']) s[k] = Math.round(s[k] * sm);
+    s.repair = Math.floor(s.repair * sm);
+    if (pw.sis === 0) s.radar = false;
+    s.thrust *= PWR.motT[pw.mot]; s.cons *= PWR.motC[pw.mot];
+    if ((P.temp || 0) > 90) s.thrust *= 0.88;
+    s.armAcc = PWR.armA[pw.arm]; s.armOff = pw.arm === 0;
+    s.pw = pw;
     if (has('halcon')) s.vision += 3;
     if (has('tirador')) s.aim += 10;
     if (has('navegante')) s.cons *= 0.88;
@@ -121,14 +137,16 @@ const G = {
     if (has('mecanico')) s.repair += 1;
     s.night = this.dayPhase() === 'noche';
     for (const m of P.cargo) if (m) s.mass += m.mass;
-    s.mass += P.fuel / 25;
+    s.mass += P.fuel / 25 + (P.ice || 0) / 12;
     s.mass = Math.round(s.mass * 10) / 10;
     s.ratio = s.thrust / s.mass;
     let mx = s.thrust <= 0 ? 0 : s.ratio >= 0.8 ? 4 : s.ratio >= 0.55 ? 3 : s.ratio >= 0.38 ? 2 : 1;
     if (mx > 0 && s.burner) { mx = Math.min(5, mx + s.burner); s.cons *= 1.35; }
+    if (mx > 1 && (P.ice || 0) >= 90) mx--;
     if (P.fuel <= 0 && s.cons > 0) mx = 0;
     s.maxS = mx;
     s.man = Math.min(3, s.man);
+    s.turnMax = this.turnSteps(P.s, s);
     s.stealth = Math.min(70, s.stealth);
     s.grabLim = 2 + Math.min(2, s.grab);
     s.visR = Math.max(4, (P.alt ? 12 : 8) + s.vision - (s.night ? 4 : 0));
@@ -138,7 +156,76 @@ const G = {
   },
   fuelUse(s, speed, alt, h) {
     if (h == null) h = this.st.plane.h;
-    return s.cons * (0.6 + 0.4 * speed) * (alt ? 1 : 1.2) * this.windMul(h);
+    return s.cons * (0.6 + 0.4 * speed) * (alt ? 1 : 1.2) * this.windMul(h) * (this.st.plane.radOpen ? 1.08 : 1);
+  },
+  // giro máximo en pasos de 45° según la velocidad actual (más lento = más cerrado)
+  turnSteps(speed, s) {
+    let t = clamp(4 - speed, 1, 3) + ((s ? s.man : 1) - 1);
+    if ((this.st.plane.ice || 0) >= 60) t--;
+    return clamp(t, 1, 4);
+  },
+  // energía del generador
+  powerUsed() { const p = this.st.power; return p.mot + p.arm + p.sis; },
+  setPower(bus, v) {
+    const st = this.st, S = this.calc();
+    v = clamp(v, 0, 4);
+    const other = this.powerUsed() - st.power[bus];
+    if (other + v > S.gen) { Sound.play('deny'); return false; }
+    st.power[bus] = v;
+    Sound.play('click');
+    this.save();
+    return true;
+  },
+  cyclePower(bus) {
+    const st = this.st, S = this.calc();
+    const free = S.gen - this.powerUsed();
+    if (st.power[bus] < 4 && free > 0) return this.setPower(bus, st.power[bus] + 1);
+    return this.setPower(bus, 0);
+  },
+  fixPower() {
+    const st = this.st, S = this.calc();
+    let over = this.powerUsed() - S.gen, cut = false;
+    for (const b of ['sis', 'arm', 'mot']) while (over > 0 && st.power[b] > 0) { st.power[b]--; over--; cut = true; }
+    if (cut) this.log(`Caída del generador (${S.gen} unidades): se recorta la energía.`, COL.yellow);
+  },
+  toggleRadiator() {
+    const P = this.st.plane;
+    P.radOpen = !P.radOpen;
+    this.log(P.radOpen ? 'Radiador ABIERTO: refrigeración máxima, +8% de consumo por resistencia.' : 'Radiador CERRADO.', COL.o3);
+    Sound.play('click');
+    this.save();
+  },
+  // temperatura de motores e hielo, una vez por turno
+  thermal(S) {
+    const st = this.st, P = st.plane, R = this.R;
+    const r = S.maxS ? P.s / S.maxS : 0;
+    const heat = S.engines && P.fuel > 0 ? 1 + 7 * r * r * PWR.motH[st.power.mot] + (S.burner ? 3 : 0) : 0;
+    const storm = this.inStorm(P.x, P.y);
+    const cool = (P.radOpen ? 11 : 6) * (P.alt ? 1.2 : 1) * (S.night ? 1.1 : 1) * (storm ? 1.3 : 1);
+    const amb = P.alt ? 25 : 35;
+    const t0 = P.temp;
+    P.temp = clamp(P.temp + heat - cool, amb, 130);
+    if (P.temp > 100) {
+      const eng = P.slots.map((m, i) => [m, i]).filter(([m]) => m && m.cat === 'motor');
+      if (eng.length) {
+        const [m, i] = R.pick(eng);
+        const dmg = R.int(2, 4) + Math.floor((P.temp - 100) / 10);
+        m.hp -= dmg;
+        this.log(`¡SOBRECALENTAMIENTO! ${modName(m)} −${dmg}. Abre el radiador (V) o reduce potencia.`, COL.red);
+        FX.burst(P.x, P.y, { n: 6, chars: '°·', cols: [COL.white, COL.grey], speed: 2, grav: -1 });
+        if (m.hp <= 0) { P.slots[i] = null; st.stats.modsLost++; st.sec.mods++; this.log(`¡${modName(m)} se ha gripado!`, COL.red); FX.explosion(P.x, P.y, false); Sound.play('boom'); }
+      }
+    } else if (P.temp > 85 && t0 <= 85) { this.log('Temperatura de motores en zona amarilla (85°).', COL.yellow); Sound.play('alarm'); }
+    // hielo
+    const cold = SECTORS[st.sector].cold || 0.5;
+    let di = P.alt ? cold * 1.2 + (S.night ? 2 : 0) + (storm ? 5 : 0) : -4;
+    if (st.power.sis >= 3) di -= 7;
+    if (P.temp > 80) di -= 2;
+    const i0 = P.ice;
+    P.ice = clamp(P.ice + di, 0, 100);
+    for (const th of [30, 60, 90]) if (i0 < th && P.ice >= th) {
+      this.log(th === 30 ? 'Hielo en las alas (30%): el T-0 pesa más.' : th === 60 ? 'Hielo al 60%: los alerones responden peor (−45° de giro).' : '¡Hielo al 90%! Pierdes velocidad máxima. Baja o activa el deshielo (SIS ≥ 3).', th >= 60 ? COL.yellow : COL.storm);
+    }
   },
   // viento: a favor ahorra hasta un 20%, en contra cuesta hasta un 20%
   windMul(h) {
@@ -159,7 +246,7 @@ const G = {
     const st = this.st, P = st.plane, S = this.calc();
     const res = [], seen = {};
     const glide = S.maxS === 0;
-    for (let turn = -S.man; turn <= S.man; turn++) {
+    for (let turn = -S.turnMax; turn <= S.turnMax; turn++) {
       for (const thr of [0, -1, 1]) {
         if (glide && thr !== 0) continue;
         let ns;
@@ -225,6 +312,7 @@ const G = {
       S = this.calc();
     }
 
+    st.bank = opt.turn;
     P.h = opt.nh;
     P.s = opt.ns;
     const sick = P.slots.find(m => m && m.cat === 'motor' && isCrit(m));
@@ -289,6 +377,8 @@ const G = {
       this.log('Combustible bajo (20%). Busca un depósito ⌂ o la pista.', COL.yellow);
     }
 
+    this.thermal(S);
+    this.fixPower();
     this.reveal();
 
     // disparo del jugador
@@ -633,7 +723,7 @@ const G = {
     const P = this.st.plane;
     S = S || this.calc();
     const d = cheb(P.x, P.y, tgt.x, tgt.y);
-    let c = w.acc + S.aim - Math.max(0, d - 1) * 3;
+    let c = w.acc + S.aim + (S.armAcc || 0) - Math.max(0, d - 1) * 3;
     if (!tgt.g && w.anom !== 'certero') c -= (tgt.s || 0) * 4;
     return clamp(Math.round(c), 5, 97);
   },
@@ -657,6 +747,7 @@ const G = {
   playerFire(S) {
     const st = this.st, P = st.plane, R = this.R;
     if (st.fireMode === 'hold' || st.evading) return;
+    if (S.armOff) { if (this.weaponTargets && st.enemies.length) this.hint('armoff' + st.sector, 'Bus de ARMAS sin energía: las armas no disparan.'); return; }
     let delay = 0, fired = false;
     for (let i = 0; i < SLOTS.length; i++) {
       const w = P.slots[i];
@@ -1245,6 +1336,7 @@ const G = {
     }
     const S = this.calc();
     P.fuel = Math.min(P.fuel, S.fuelCap);
+    this.fixPower();
     return true;
   },
   // en vuelo: la reconfiguración cuesta un turno

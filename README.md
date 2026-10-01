@@ -22,6 +22,11 @@ Las instrucciones completas están dentro del juego, en **INSTRUCCIONES**.
 | `ESPACIO` / `ENTER` | ejecutar la maniobra |
 | clic en una flecha del mapa | ejecutar esa maniobra directamente |
 | `X` | cambiar de altitud |
+| `E` | maniobra evasiva (tonel) |
+| `B` / `R` | bengalas / kit de reparación |
+| `Z` / rueda del ratón | zoom ×1 / ×2 |
+| botón central (o arrastrar en vacío) | desplazar el mapa |
+| `C` | volver a centrar la cámara en el T-0 |
 | `TAB` / clic en un enemigo | marcar objetivo |
 | `F` | fuego automático / retener |
 | `M` | mapa del sector |

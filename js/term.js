@@ -31,6 +31,7 @@ const Term = (() => {
     ch = clamp(ch + T.zoom, 10, 32);
     const fs = Math.round(ch * 0.8);
     T.font = `${fs}px "IBM Plex Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace`;
+    T.fontBig = `${fs * 2}px "IBM Plex Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace`;
     cB.font = T.font;
     let cw = Math.round(cB.measureText('M').width);
     if (!(cw >= 5)) cw = Math.round(fs * 0.6);
@@ -70,6 +71,25 @@ const Term = (() => {
       return;
     }
     CH[i] = c; if (fg) FG[i] = fg; if (bg) BG[i] = bg;
+  };
+  // Celda grande 2×2 (zoom). Las 4 celdas guardan el contenido completo para que cualquiera
+  // de ellas pueda redibujar el grupo: anclaje = c, cubiertas = '\u0001' + dx + dy + c. FG lleva prefijo '*'.
+  T.putBig = function (x, y, c, fg, bg) {
+    x |= 0; y |= 0;
+    if (layer) { T.put(x, y, c, fg, bg); return; }
+    if (x < 0 || y < 0 || x + 1 >= T.cols || y + 1 >= T.rows) return;
+    const f = '*' + fg;
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const i = (y + dy) * T.cols + x + dx;
+      CH[i] = (dx || dy) ? '\u0001' + dx + dy + c : c; FG[i] = f; BG[i] = bg || COL.bg;
+    }
+  };
+  T.setBgBig = function (x, y, bg) {
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 0 || yy < 0 || xx >= T.cols || yy >= T.rows) continue;
+      BG[yy * T.cols + xx] = bg;
+    }
   };
   T.setBg = function (x, y, bg) {
     x |= 0; y |= 0;
@@ -149,9 +169,9 @@ const Term = (() => {
   };
 
   // ---- dibujo de celdas ----
-  function glyph(ctx, x, y, c, fg) {
+  function glyph(ctx, x, y, c, fg, sc = 1) {
     if (c === ' ') return;
-    const cw = T.cw, ch = T.ch;
+    const cw = T.cw * sc, ch = T.ch * sc;
     const b = BOX[c];
     if (b) {
       ctx.fillStyle = fg;
@@ -183,7 +203,11 @@ const Term = (() => {
       case '▐': ctx.fillStyle = fg; ctx.fillRect(x + (cw >> 1), y, cw - (cw >> 1), ch); return;
     }
     ctx.fillStyle = fg;
-    ctx.fillText(c, x + cw / 2, y + ch / 2 + 1);
+    if (sc !== 1) {
+      ctx.font = T.fontBig;
+      ctx.fillText(c, x + cw / 2, y + ch / 2 + 2);
+      ctx.font = T.font;
+    } else ctx.fillText(c, x + cw / 2, y + ch / 2 + 1);
   }
   T.glyph = glyph;
 
@@ -193,12 +217,30 @@ const Term = (() => {
     glyph(ctx, x, y, c, fg);
   }
 
+  function isBig(i) { return FG[i] && FG[i].charCodeAt(0) === 42; }
+  function drawBigGroup(i, done) {
+    const c0 = CH[i];
+    let ai = i, c = c0;
+    if (c0.charCodeAt(0) === 1) { ai = i - (+c0[1]) - (+c0[2]) * T.cols; c = c0.slice(3); }
+    const key = ai + '|' + c + FG[i] + BG[i];
+    if (done.has(key)) return;
+    done.add(key);
+    const x = (ai % T.cols) * T.cw, y = ((ai / T.cols) | 0) * T.ch;
+    cB.fillStyle = BG[i]; cB.fillRect(x, y, T.cw * 2, T.ch * 2);
+    glyph(cB, x, y, c, FG[i].slice(1), 2);
+    // celdas normales escritas encima del grupo: redibujarlas
+    for (const j of [ai, ai + 1, ai + T.cols, ai + T.cols + 1]) {
+      if (j !== i && j >= 0 && j < CH.length && !isBig(j)) drawCell(cB, j, CH[j], FG[j], BG[j]);
+    }
+  }
   T.present = function () {
     const n = CH.length;
+    const done = new Set();
     for (let i = 0; i < n; i++) {
       const c = CH[i], f = FG[i], b = BG[i];
       if (!dirtyAll && PCH[i] === c && PFG[i] === f && PBG[i] === b) continue;
-      drawCell(cB, i, c, f, b);
+      if (isBig(i)) drawBigGroup(i, done);
+      else drawCell(cB, i, c, f, b);
       PCH[i] = c; PFG[i] = f; PBG[i] = b;
     }
     dirtyAll = false;

@@ -42,6 +42,8 @@ function modTip(m, slotIdx) {
   if (m.cat === 'sistema') for (const k in m.sys) L.push(`${SYSN[k]} {w}+${m.sys[k]}{/}`);
   if (m.quirks) for (const k of m.quirks) L.push(`Rasgo ${QUIRKS[k].good ? '{n}' : '{r}'}${QUIRKS[k].n}{/}: ${QUIRKS[k].d}`);
   if (m.anom) L.push(`{c}Anómalo: ${ANOM[m.cat].d}{/}`);
+  if (isCrit(m)) L.push(`{r}AVERÍA: ${CRIT_TXT[m.cat]}.{/}`);
+  if (Screens.cur === Hangar && G.upgradeCost(m) != null) L.push(`{g}Taller: mejorar a ${TIERS[m.tier + 1].n} por ${G.upgradeCost(m)} ¤.{/}`);
   if (m.price != null) L.push(`{y}Precio: ${m.price} ¤ chatarra{/}`);
   if (m.fragPrice != null) L.push(`{c}Precio: ${m.fragPrice} ◊ fragmentos{/}`);
   if (slotIdx != null) L.push(`{g}Ranura: ${SLOTS[slotIdx].n}{/}`);
@@ -202,7 +204,7 @@ const Instr = {
     Term.fill(0, 0, C, 1, ' ', COL.o1, COL.o6);
     Term.text(2, 0, 'LA MISIÓN TOPOLEV', COL.o2, COL.o6);
     Term.text(22, 0, '· INSTRUCCIONES · MANUAL DE VUELO DEL T-0 «ZHURAVL»', COL.o3, COL.o6);
-    const mw = 24;
+    const mw = 26;
     Term.box(1, 2, mw, INSTR.length * 2 + 3, COL.o4, COL.panel, 'ÍNDICE');
     INSTR.forEach((p, i) => {
       const y = 4 + i * 2, sel = i === this.page;
@@ -345,6 +347,7 @@ const Panel = {
       const bg = dropOk ? COL.hi2 : hl ? COL.hi : COL.panel;
       Term.fill(x + 1, ry, inner, 1, ' ', COL.o1, bg);
       Term.put(x + 2, ry, CAT[SLOTS[i].cat].g, m ? hpColor(m) : COL.dgrey, bg);
+      if (m && isCrit(m)) Term.put(x + 3, ry, '!', blink(0.6) ? COL.red : COL.yellow, bg);
       if (m) {
         let name = modName(m);
         if (m.cat === 'arma') name += m.maxAmmo ? ` ·${m.ammo}` : '';
@@ -363,9 +366,9 @@ const Panel = {
     // bodega
     const used = P.cargo.filter(Boolean).length;
     Term.put(x, cy, '├', COL.o4); Term.hline(x + 1, cy, inner, COL.o4); Term.put(x + w - 1, cy, '┤', COL.o4);
-    Term.text(x + 2, cy, ` BODEGA ${used}/${CARGO_SIZE} `, COL.o2);
+    Term.text(x + 2, cy, ` BODEGA ${used}/${P.cargo.length} `, COL.o2);
     cy++;
-    for (let i = 0; i < CARGO_SIZE; i++) {
+    for (let i = 0; i < P.cargo.length; i++) {
       const m = P.cargo[i], ry = cy + i;
       const dst = { to: 'cargo', i };
       const dropOk = UI.dropHover(x + 1, ry, inner, 1, p => G.canMove(p, dst));
@@ -385,16 +388,18 @@ const Panel = {
         if (hov) { const tp = modTip(m); tp.lines.push('{g}Arrastra a una ranura o clic derecho para equipar.{/}'); UI.tip = tp; }
       } else Term.text(x + 4, ry, '· libre', COL.o6, bg);
     }
-    cy += CARGO_SIZE;
+    cy += P.cargo.length;
     return cy;
   },
 };
 
 // ---------------------------------------------------------------- VUELO
+const T_len = s => Term.richLen(s);
 const Flight = {
   camX: 0, camY: 0, showMap: false, pause: false, hoverOpt: null, briefT0: 0, endT: 0,
+  zoom: 1, free: false, panning: null, panX: 0, panY: 0, lastTurn: -1, vw: 1, vh: 1,
   enter(arg) {
-    if (arg !== 'keep') { this.snapCam = true; this.pause = false; this.showMap = false; }
+    if (arg !== 'keep') { this.snapCam = true; this.pause = false; this.showMap = false; this.free = false; this.zoom = Main.settings.mapZoom || 1; }
     this.briefT0 = now();
     this.endT = 0;
   },
@@ -402,7 +407,8 @@ const Flight = {
     const C = Term.cols, Rr = Term.rows;
     const sideW = 46, logH = Rr >= 44 ? 10 : 8;
     return {
-      map: { x: 0, y: 1, w: C - sideW, h: Rr - 1 - logH },
+      bar: { x: 0, y: 1, w: C - sideW },
+      map: { x: 0, y: 2, w: C - sideW, h: Rr - 2 - logH },
       side: { x: C - sideW, y: 1, w: sideW, h: Rr - 1 },
       log: { x: 0, y: Rr - logH, w: C - sideW, h: logH },
     };
@@ -418,14 +424,20 @@ const Flight = {
     const L = this.L = this.layout();
     const P = st.plane, S = G.calc();
     Term.clear(COL.bg);
-    const modal = this.pause || this.showMap || st.phase === 'briefing' || Modal.cur;
+    const modal = this.pause || this.showMap || st.phase === 'briefing' || Modal.cur || st.event;
     UI.disabled = !!modal || st.phase === 'dead' || st.phase === 'won';
 
-    // cámara
-    const tx = P.x - L.map.w / 2 + DX[P.h] * L.map.w * 0.12, ty = P.y - L.map.h / 2 + DY[P.h] * L.map.h * 0.12;
-    const cxT = st.map.w <= L.map.w ? -(L.map.w - st.map.w) / 2 : clamp(tx, -2, st.map.w - L.map.w + 2);
-    const cyT = st.map.h <= L.map.h ? -(L.map.h - st.map.h) / 2 : clamp(ty, -1, st.map.h - L.map.h + 1);
-    if (this.snapCam) { this.camX = cxT; this.camY = cyT; this.snapCam = false; }
+    // cámara (con zoom y paneo libre)
+    const z = this.zoom;
+    const vw = this.vw = Math.floor(L.map.w / z), vh = this.vh = Math.floor(L.map.h / z);
+    if (st.turn !== this.lastTurn) { this.lastTurn = st.turn; if (!this.panning) this.free = false; }
+    let cxT, cyT;
+    if (this.free) { cxT = this.panX; cyT = this.panY; }
+    else { cxT = P.x - vw / 2 + DX[P.h] * vw * 0.12; cyT = P.y - vh / 2 + DY[P.h] * vh * 0.12; }
+    cxT = st.map.w <= vw ? -(vw - st.map.w) / 2 : clamp(cxT, this.free ? -vw / 2 : -2, st.map.w - (this.free ? vw / 2 : vw - 2));
+    cyT = st.map.h <= vh ? -(vh - st.map.h) / 2 : clamp(cyT, this.free ? -vh / 2 : -1, st.map.h - (this.free ? vh / 2 : vh - 1));
+    if (this.free) { this.panX = cxT; this.panY = cyT; }
+    if (this.snapCam || this.panning) { this.camX = cxT; this.camY = cyT; this.snapCam = false; }
     const k = 1 - Math.exp(-dt * 5);
     this.camX += (cxT - this.camX) * k; this.camY += (cyT - this.camY) * k;
     this.icx = Math.round(this.camX); this.icy = Math.round(this.camY);
@@ -438,62 +450,120 @@ const Flight = {
 
     this.drawTopBar(S);
     this.drawMap(L, S);
+    this.drawActionBar(L, S);
     this.drawLog(L, S);
     UI.disabled = !!modal || st.phase === 'dead' || st.phase === 'won';
     const end = Panel.draw(L.side.x, L.side.y, L.side.w, L.side.h, 'flight');
     this.drawSideButtons(L, end, S);
     UI.disabled = false;
+    if (this.panning) UI.cursor = 'grabbing';
 
     // ambiente
-    if (Math.random() < 0.18) FX.parts.push({ x: this.icx + Math.random() * L.map.w, y: this.icy - 1, vx: -0.4, vy: 1 + Math.random() * 0.8, life: 30, max: 30, ch: '·', cols: ['#4a3b2e'], drag: 0, grav: 0, delay: 0, glow: false, snow: true });
-    FX.parts = FX.parts.filter(p => !p.snow || p.y < this.icy + L.map.h + 1);
+    if (Math.random() < 0.18) FX.parts.push({ x: this.icx + Math.random() * vw, y: this.icy - 1, vx: -0.4 + (st.wind ? DX[st.wind.d] * 0.5 : 0), vy: 1 + Math.random() * 0.8, life: 30, max: 30, ch: '·', cols: ['#4a3b2e'], drag: 0, grav: 0, delay: 0, glow: false, snow: true });
+    FX.parts = FX.parts.filter(p => !p.snow || p.y < this.icy + vh + 1);
     if (st.phase === 'flight' && Math.random() < dt * (3 + P.s * 5)) FX.trail(P.dx - DX[P.h] * 0.6, P.dy - DY[P.h] * 0.6, P.alt ? COL.o1 : COL.o3);
 
     if (st.phase === 'briefing') this.drawBriefing();
+    if (st.event && st.phase === 'flight') this.drawEvent();
     if (this.showMap) this.drawSectorMap(S);
     if (this.pause) this.drawPause();
     Modal.draw();
   },
 
+  setZoom(nz, focus) {
+    if (nz === this.zoom) return;
+    const L = this.L || this.layout();
+    const ovw = Math.floor(L.map.w / this.zoom), ovh = Math.floor(L.map.h / this.zoom);
+    const c = focus || { x: this.camX + ovw / 2, y: this.camY + ovh / 2 };
+    this.zoom = nz;
+    const nvw = Math.floor(L.map.w / nz), nvh = Math.floor(L.map.h / nz);
+    if (focus || this.free) { this.free = true; this.panX = c.x - nvw / 2; this.panY = c.y - nvh / 2; }
+    this.snapCam = true;
+    Main.settings.mapZoom = nz; Save.saveSettings(Main.settings);
+    Sound.play('click');
+  },
+  mouseWorld() {
+    const L = this.L;
+    if (!L) return null;
+    const z = this.zoom, mx = UI.m.cx - L.map.x, my = UI.m.cy - L.map.y;
+    if (mx < 0 || my < 0 || mx >= this.vw * z || my >= this.vh * z) return null;
+    return { x: this.icx + Math.floor(mx / z), y: this.icy + Math.floor(my / z) };
+  },
+  panStart(e, btn) {
+    const st = G.st;
+    if (!st || !this.L || this.pause || this.showMap || st.event || Modal.cur) return false;
+    const c = Term.cellAt(e.clientX, e.clientY), m = this.L.map;
+    if (c.cx < m.x || c.cy < m.y || c.cx >= m.x + m.w || c.cy >= m.y + m.h) return false;
+    this.panning = { sx: e.clientX, sy: e.clientY, cx: this.camX, cy: this.camY, moved: false, btn };
+    return true;
+  },
+  panMove(e) {
+    const p = this.panning;
+    if (!p) return;
+    const dx = e.clientX - p.sx, dy = e.clientY - p.sy;
+    if (!p.moved && Math.hypot(dx, dy) < 5) return;
+    p.moved = true;
+    this.free = true;
+    this.panX = p.cx - dx / (Term.cw * this.zoom);
+    this.panY = p.cy - dy / (Term.ch * this.zoom);
+  },
+  panEnd() { this.panning = null; },
+  wheel(e) {
+    if (!G.st || !this.L) return;
+    const w = this.mouseWorld();
+    if (!w) return;
+    if (e.deltaY < 0 && this.zoom === 1) this.setZoom(2, w);
+    else if (e.deltaY > 0 && this.zoom === 2) this.setZoom(1);
+  },
+  center() { this.free = false; this.snapCam = false; Sound.play('click'); },
+
   drawTopBar(S) {
     const st = G.st, C = Term.cols;
     Term.fill(0, 0, C, 1, ' ', COL.o1, COL.o6);
+    const menuW = 10, lim = C - menuW - 2;
     let x = 1;
-    x += Term.text(x, 0, 'LA MISIÓN TOPOLEV', COL.o2, COL.o6) + 1;
-    Term.put(x, 0, '║', COL.o4, COL.o6); x += 2;
-    x += Term.text(x, 0, `SECTOR ${st.sector + 1}/5 · ${SECTORS[st.sector].name}`, COL.cream, COL.o6) + 1;
-    Term.put(x, 0, '║', COL.o4, COL.o6); x += 2;
-    x += Term.text(x, 0, `TURNO ${st.turn}`, COL.o3, COL.o6) + 1;
-    Term.put(x, 0, '║', COL.o4, COL.o6); x += 2;
-    x += Term.text(x, 0, `◊ ${st.frags}`, COL.cyan, COL.o6) + 2;
-    x += Term.text(x, 0, `¤ ${st.scrap}`, COL.o2, COL.o6) + 2;
-    if (st.nucleo) x += Term.text(x, 0, blink(1) ? '◉ NÚCLEO' : '◉ núcleo', COL.cyan, COL.o6) + 2;
-    Term.put(x, 0, '║', COL.o4, COL.o6); x += 2;
+    const seg = (str, col, gap = 1) => { if (x + T_len(str) > lim) return false; x += Term.rich(x, 0, str, col, COL.o6) + gap; return true; };
+    const sep = () => { if (x + 2 > lim) return; Term.put(x, 0, '║', COL.o4, COL.o6); x += 2; };
+    seg('LA MISIÓN TOPOLEV', COL.o2); sep();
+    seg(`SECTOR ${st.sector + 1}/5 · ${SECTORS[st.sector].name}`, COL.cream); sep();
+    seg(`TURNO ${st.turn}`, COL.o3); sep();
+    seg(`{c}◊ ${st.frags}{/}  {b}¤ ${st.scrap}{/}${st.nucleo ? '  {c}◉ NÚCLEO{/}' : ''}`, COL.o2); sep();
     x += Term.text(x, 0, 'ALERTA ', st.alert >= 50 ? COL.red : COL.o3, COL.o6);
     const ac = st.alert >= 75 ? (blink(0.5) ? COL.red : COL.dred) : st.alert >= 50 ? COL.red : st.alert >= 25 ? COL.o1 : COL.o3;
-    Term.bar(x, 0, 12, st.alert / 100, ac, COL.o5, COL.o6); x += 13;
-    x += Term.text(x, 0, `${Math.round(st.alert)}%`, ac, COL.o6) + 2;
-    x += Term.text(x, 0, `PUNTOS ${st.score}`, COL.o4, COL.o6);
-    const menuW = 10;
+    Term.bar(x, 0, 10, st.alert / 100, ac, COL.o5, COL.o6); x += 11;
+    x += Term.text(x, 0, `${Math.round(st.alert)}%`, ac, COL.o6) + 1; sep();
+    const ph = G.dayPhase();
+    const phIcon = ph === 'noche' ? '☾' : ph === 'día' ? '☼' : '◐';
+    seg(`${phIcon} ${G.clockStr()} ${ph.toUpperCase()}`, ph === 'noche' ? COL.storm : COL.o3); sep();
+    if (st.wind) seg(`VIENTO ${ARROWS[st.wind.d]}${'≈'.repeat(st.wind.s)}`, COL.o3);
     if (C - menuW - 1 > x) UI.button(C - menuW - 1, 0, 'MENÚ', { w: menuW, col: COL.o2, bg: COL.o6, onClick: () => { this.pause = true; } });
+    if (st.wind && UI.hit(x - 12, 0, 12, 1)) UI.tip = { title: 'VIENTO', lines: [`Sopla hacia el ${DIRN[st.wind.d]}, fuerza ${st.wind.s}.`, `Volar a favor ahorra hasta un ${st.wind.s * 8}% de combustible;`, 'volar en contra cuesta lo mismo de más.', 'Arrastra las tormentas.'] };
   },
 
   drawMap(L, S) {
     const st = G.st, P = st.plane, map = st.map;
     const { x: ox, y: oy, w, h } = L.map;
+    const z = this.zoom, vw = this.vw, vh = this.vh;
     const cx = this.icx, cy = this.icy;
     const t = now();
     const opts = st.phase === 'flight' ? G.options() : [];
     const pend = st.phase === 'flight' ? G.pendingOption(opts) : null;
+    const put = z === 1 ? (vx, vy, ch, fg, bg) => Term.put(ox + vx, oy + vy, ch, fg, bg) : (vx, vy, ch, fg, bg) => Term.putBig(ox + vx * 2, oy + vy * 2, ch, fg, bg);
+    const setBg = z === 1 ? (vx, vy, bg) => Term.setBg(ox + vx, oy + vy, bg) : (vx, vy, bg) => Term.setBgBig(ox + vx * 2, oy + vy * 2, bg);
+    const inView = (vx, vy) => vx >= 0 && vy >= 0 && vx < vw && vy < vh;
+    const region = (vx, vy, o) => UI.region(ox + vx * z, oy + vy * z, z, z, o);
+    const hitV = (vx, vy) => UI.hit(ox + vx * z, oy + vy * z, z, z);
+    const night = S.night, dusk = G.dayPhase() === 'crepúsculo';
+    const visF = night ? 0.62 : dusk ? 0.85 : 1;
     // terreno
-    for (let vy = 0; vy < h; vy++) for (let vx = 0; vx < w; vx++) {
-      const wx = cx + vx, wy = cy + vy, sx = ox + vx, sy = oy + vy;
-      if (wx < 0 || wy < 0 || wx >= map.w || wy >= map.h) { Term.put(sx, sy, ((wx + wy) & 1) ? ' ' : '·', '#120a05', COL.bg); continue; }
+    for (let vy = 0; vy < vh; vy++) for (let vx = 0; vx < vw; vx++) {
+      const wx = cx + vx, wy = cy + vy;
+      if (wx < 0 || wy < 0 || wx >= map.w || wy >= map.h) { put(vx, vy, ((wx + wy) & 1) ? ' ' : '·', '#120a05', COL.bg); continue; }
       const idx = wy * map.w + wx;
-      if (!map.seen[idx]) { Term.put(sx, sy, (wx % 6 === 0 && wy % 3 === 0) ? '+' : ' ', '#1d1007', COL.bg); continue; }
+      if (!map.seen[idx]) { put(vx, vy, (wx % 6 === 0 && wy % 3 === 0) ? '+' : ' ', '#1d1007', COL.bg); continue; }
       const vis = G.visDist(wx, wy) <= S.visR;
       const c = map.t[idx], ter = TER[c];
-      let ch = c, fg = vis ? ter.c : dimc(ter.c), bg = ter.bg ? (vis ? ter.bg : COL.bg) : COL.bg;
+      let ch = c, fg = vis ? (visF < 1 ? dimc(ter.c, visF) : ter.c) : dimc(ter.c, night ? 0.3 : 0.42), bg = ter.bg ? (vis ? ter.bg : COL.bg) : COL.bg;
       if (ter.anom && vis) { fg = blink(0.8) && hash2(wx, wy, Math.floor(t * 3)) > 0.5 ? COL.white : COL.purple; }
       if (vis && ter.water && hash2(wx, wy, Math.floor(t)) > 0.93) fg = COL.cream;
       const it = map.items[idx];
@@ -501,6 +571,7 @@ const Flight = {
         const d = ITEMS[it.type];
         ch = d.g; fg = vis ? d.c : dimc(d.c, 0.6);
         if ((it.type === 'frag' || it.type === 'nucleo') && blink(1.2)) fg = it.type === 'nucleo' ? COL.white : COL.cyan;
+        if ((it.type === 'survivor' || it.type === 'signal' || it.type === 'cache') && blink(0.8)) fg = COL.white;
       }
       const gr = map.ground[idx];
       if (gr) { ch = GROUND[gr.type].g; fg = vis ? GROUND[gr.type].c : dimc(COL.red, 0.5); }
@@ -509,7 +580,7 @@ const Flight = {
         if (sl) { ch = sl === 2 ? '▒' : '░'; fg = sl === 2 ? COL.storm : dimc(COL.storm, 0.7); }
       }
       if (map.exit.includes(idx)) { fg = blink(1) ? COL.yellow : '#ffd08a'; }
-      Term.put(sx, sy, ch, fg, bg);
+      put(vx, vy, ch, fg, bg);
     }
 
     // arco y alcance del arma bajo el ratón
@@ -520,20 +591,29 @@ const Flight = {
         if (!dx && !dy) continue;
         const wx = P.x + dx, wy = P.y + dy;
         if (!G.arcOk(P.x, P.y, P.h, wx, wy, arc)) continue;
-        const sx = ox + wx - cx, sy = oy + wy - cy;
-        if (sx >= ox && sy >= oy && sx < ox + w && sy < oy + h) Term.setBg(sx, sy, blink(1) ? '#3d1c08' : '#33170a');
+        if (inView(wx - cx, wy - cy)) setBg(wx - cx, wy - cy, blink(1) ? '#3d1c08' : '#33170a');
+      }
+    }
+    // alcance de amenazas bajo el ratón (SAM / antiaéreo)
+    const mw = this.mouseWorld();
+    if (mw && !UI.disabled) {
+      const gr = map.ground[mw.y * map.w + mw.x];
+      if (gr && map.seen[mw.y * map.w + mw.x] && GROUND[gr.type].range) {
+        const r = GROUND[gr.type].range;
+        for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+          const vx = mw.x + dx - cx, vy = mw.y + dy - cy;
+          if ((dx || dy) && inView(vx, vy)) setBg(vx, vy, '#2e0c06');
+        }
       }
     }
 
     // previsualización de maniobras
     this.hoverOpt = null;
-    if (st.phase === 'flight' && !this.pause && !this.showMap) {
-      const toS = (wx, wy) => [ox + wx - cx, oy + wy - cy];
-      const inView = (sx, sy) => sx >= ox && sy >= oy && sx < ox + w && sy < oy + h;
+    if (st.phase === 'flight' && !this.pause && !this.showMap && !st.event) {
       let hov = null;
       for (const o of opts) {
-        const [sx, sy] = toS(o.ex, o.ey);
-        if (inView(sx, sy) && UI.hit(sx, sy, 1, 1)) hov = o;
+        const vx = o.ex - cx, vy = o.ey - cy;
+        if (inView(vx, vy) && hitV(vx, vy)) hov = o;
       }
       this.hoverOpt = hov;
       const order = opts.slice().sort((a, b) => (a === pend || a === hov) - (b === pend || b === hov));
@@ -541,60 +621,78 @@ const Flight = {
         const isP = o === pend, isH = o === hov;
         const strong = isP || isH;
         o.path.forEach(([px, py], j) => {
-          const [sx, sy] = toS(px, py);
-          if (!inView(sx, sy)) return;
-          if (j < o.path.length - 1) { if (strong) Term.put(sx, sy, '·', isH ? COL.white : COL.o2); }
+          const vx = px - cx, vy = py - cy;
+          if (!inView(vx, vy)) return;
+          if (j < o.path.length - 1 && strong) put(vx, vy, '·', isH ? COL.white : COL.o2, COL.bg);
         });
-        const [sx, sy] = toS(o.ex, o.ey);
-        if (!inView(sx, sy)) continue;
+        const vx = o.ex - cx, vy = o.ey - cy;
+        if (!inView(vx, vy)) continue;
         const bad = o.path.some(([px, py]) => P.alt === 0 && px >= 0 && py >= 0 && px < map.w && py < map.h && TER[map.t[py * map.w + px]].block && map.seen[py * map.w + px]);
         const fg = isH ? COL.bg : isP ? COL.white : bad ? COL.red : COL.o3;
         const bg = isH ? COL.o2 : isP ? COL.hi2 : COL.hi;
-        Term.put(sx, sy, ARROWS[o.nh], fg, bg);
-        UI.region(sx, sy, 1, 1, { onClick: () => G.doTurn(o) });
+        put(vx, vy, ARROWS[o.nh], fg, bg);
+        region(vx, vy, { onClick: () => G.doTurn(o) });
       }
       if (hov) UI.tip = this.optTip(hov, S, P);
     }
 
     // regiones e info de enemigos/terreno
-    if (!UI.disabled && UI.hit(ox, oy, w, h) && !this.hoverOpt && !UI.drag) {
-      const wx = UI.m.cx - ox + cx, wy = UI.m.cy - oy + cy;
-      Term.setBg(UI.m.cx, UI.m.cy, COL.hi2);
-      const onEnemy = st.enemies.some(en => en.x === wx && en.y === wy && G.enemyVisible(en, S));
+    if (!UI.disabled && mw && !this.hoverOpt && !UI.drag && !this.panning) {
+      setBg(mw.x - cx, mw.y - cy, COL.hi2);
+      const onEnemy = st.enemies.some(en => en.x === mw.x && en.y === mw.y && G.enemyVisible(en, S));
       if (onEnemy || now() - (UI.m.t || 0) > 0.35) {
-        const tip = this.cellTip(wx, wy, S);
+        const tip = this.cellTip(mw.x, mw.y, S);
         if (tip) UI.tip = tip;
       }
     }
     for (const e of st.enemies) {
-      if (!G.enemyVisible(e, S)) continue;
-      const sx = ox + e.x - cx, sy = oy + e.y - cy;
-      UI.region(sx, sy, 1, 1, { onClick: () => { st.targetId = e.id; Sound.play('click'); } });
+      if (!G.enemyVisible(e, S) || !inView(e.x - cx, e.y - cy)) continue;
+      region(e.x - cx, e.y - cy, { onClick: () => { st.targetId = e.id; Sound.play('click'); } });
     }
     for (const gg of G.groundList()) {
-      if (!map.seen[gg.idx]) continue;
-      UI.region(ox + gg.x - cx, oy + gg.y - cy, 1, 1, { onClick: () => { st.targetId = gg.id; Sound.play('click'); } });
+      if (!map.seen[gg.idx] || !inView(gg.x - cx, gg.y - cy)) continue;
+      region(gg.x - cx, gg.y - cy, { onClick: () => { st.targetId = gg.id; Sound.play('click'); } });
     }
 
     // indicador de destino (pista o Núcleo)
     const goal = (SECTORS[st.sector].nucleo && !st.nucleo && map.nuc) ? { x: map.nuc[0], y: map.nuc[1], n: 'NÚCLEO', c: COL.cyan } : { x: map.exitPos.x, y: map.exitPos.y, n: 'PISTA', c: COL.yellow };
-    const gsx = ox + goal.x - cx, gsy = oy + goal.y - cy;
-    if (gsx < ox || gsy < oy || gsx >= ox + w || gsy >= oy + h) {
+    const gvx = goal.x - cx, gvy = goal.y - cy;
+    if (!inView(gvx, gvy)) {
+      const gsx = ox + gvx * z, gsy = oy + gvy * z;
       const ccx = ox + w / 2, ccy = oy + h / 2;
       const dx = gsx - ccx, dy = gsy - ccy;
-      const sc = Math.min((w / 2 - 2) / Math.abs(dx || 1e-6), (h / 2 - 1) / Math.abs(dy || 1e-6));
+      const sc = Math.min((w / 2 - 2) / Math.abs(dx || 1e-6), (h / 2 - 2) / Math.abs(dy || 1e-6));
       const ix = Math.round(ccx + dx * sc), iy = Math.round(ccy + dy * sc);
       const a8 = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) + 2) % 8 + 8) % 8;
       const dist = cheb(P.x, P.y, goal.x, goal.y);
       const label = `${ARROWS[a8]} ${goal.n} ${dist}`;
       const lx = clamp(ix - (dx > 0 ? label.length - 1 : 0), ox, ox + w - label.length);
-      Term.text(lx, clamp(iy, oy, oy + h - 1), label, blink(1.4) ? goal.c : dimc(goal.c, 0.7), COL.bg);
+      Term.text(lx, clamp(iy, oy + 1, oy + h - 1), label, blink(1.4) ? goal.c : dimc(goal.c, 0.7), COL.bg);
     }
-    // leyenda de altitud en la esquina
-    const altTxt = P.alt ? ' ▲ ALTA ' : ' ▼ BAJA ';
-    Term.text(ox + 1, oy, altTxt, COL.bg, P.alt ? COL.cream : COL.o2);
-    if (st.pendingAlt) Term.text(ox + 9, oy, blink(0.5) ? (P.alt ? ' ⇩ DESCENSO PROGRAMADO ' : ' ⇧ ASCENSO PROGRAMADO ') : '', COL.yellow, COL.bg);
-    if (st.fireMode === 'hold') Term.text(ox + 1, oy + 1, ' FUEGO RETENIDO ', COL.bg, COL.yellow);
+    // indicador del propio avión fuera de vista (paneo libre)
+    if (this.free && !inView(P.x - cx, P.y - cy)) {
+      const label = '◎ T-0 fuera de vista · C: centrar';
+      Term.text(ox + Math.floor((w - label.length) / 2), oy + h - 1, label, blink(1) ? COL.white : COL.o2, COL.bg);
+    }
+  },
+
+  drawActionBar(L, S) {
+    const st = G.st, P = st.plane;
+    const { x: ox, y: oy, w } = L.bar;
+    Term.fill(ox, oy, w, 1, ' ', COL.o1, COL.panel);
+    let x = ox + 1;
+    const fl = st.phase === 'flight';
+    const btn = (label, o) => { const bw = o.w || label.length + 4; if (x + bw > ox + w - 1) return; UI.button(x, oy, label, Object.assign({ bg: COL.panel }, o)); x += bw + 1; };
+    const o = fl ? G.pendingOption() : null;
+    btn('► EJECUTAR', { col: COL.yellow, disabled: !fl, onClick: () => G.doTurn(G.pendingOption()), tip: { title: 'EJECUTAR (ESPACIO)', lines: o ? [`Ejecuta la maniobra programada: ${ARROWS[o.nh]} vel ${o.ns}.`, 'También puedes hacer clic en cualquier flecha del mapa.'] : [] } });
+    const altLbl = (P.alt ? '▲ ALTA' : '▼ BAJA') + (st.pendingAlt ? (P.alt ? ' → ▼' : ' → ▲') : '');
+    btn(altLbl, { w: 16, col: st.pendingAlt ? COL.yellow : P.alt ? COL.cream : COL.o2, disabled: !fl, onClick: () => { st.pendingAlt = !st.pendingAlt; }, tip: { title: 'ALTITUD (X)', lines: ['Programa un cambio de altitud para el próximo turno.', 'ALTA: ignoras el relieve, te ven los radares y los SAM.', 'BAJA: recoges objetos; montañas y antiaéreos.'] } });
+    btn(st.pendingEvade ? 'EVASIVA ✓' : st.evadeCd ? `EVASIVA ${st.evadeCd}` : 'EVASIVA', { w: 13, col: st.pendingEvade ? COL.yellow : COL.o1, disabled: !fl || (st.evadeCd > 0 && !st.pendingEvade), onClick: () => G.toggleEvade(), tip: { title: 'TONEL EVASIVO (E)', lines: ['El próximo turno: −30% de precisión enemiga,', 'pero tus armas no disparan.', st.perks.includes('reflejos') ? 'Sin coste. Recarga: 2 turnos.' : 'Cuesta 2 de combustible. Recarga: 4 turnos.'] } });
+    btn(`* BENGALA ${st.items.flares}`, { w: 14, disabled: !fl || !st.items.flares || st.flare, onClick: () => G.useFlare(), tip: { title: 'BENGALAS (B)', lines: Term.wrap(CONSUMABLES.flares.d, 44) } });
+    btn(`+ KIT ${st.items.kits}`, { w: 10, disabled: !fl || !st.items.kits || st.kitTurn === st.turn, onClick: () => G.useKit(), tip: { title: 'KIT DE REPARACIÓN (R)', lines: Term.wrap(CONSUMABLES.kits.d, 44) } });
+    btn(this.zoom === 1 ? 'ZOOM ×2' : 'ZOOM ×1', { w: 11, onClick: () => this.setZoom(this.zoom === 1 ? 2 : 1), tip: { title: 'ZOOM (Z / rueda)', lines: ['Alterna entre la vista normal y la ampliada ×2.', 'Arrastra el mapa con el botón central (o con el', 'izquierdo en una zona vacía) para desplazarlo.'] } });
+    if (this.free) btn('◎ CENTRAR', { w: 13, col: COL.yellow, onClick: () => this.center(), tip: { lines: ['Vuelve a seguir al T-0 (C).'] } });
+    if (st.fireMode === 'hold' && x + 16 < ox + w) Term.text(x, oy, ' FUEGO RETENIDO ', COL.bg, COL.yellow);
   },
 
   optTip(o, S, P) {
@@ -681,7 +779,7 @@ const Flight = {
       const col = age > 3 ? dimc(m.col, 0.6) : m.col;
       Term.text(x + 2, y + 2 + j + (h - 4 - lines.length), (age === 0 ? '› ' : '  ') + m.text, col, COL.panel, w - 4);
     });
-    Term.rich(x + 2, y + h - 1, ' {w}←→{/} girar {w}↑↓{/} acelerador {w}ESPACIO{/} ejecutar {w}X{/} altitud {w}TAB{/} objetivo {w}F{/} fuego {w}M{/} mapa {w}ESC{/} menú ', COL.o3, COL.panel, w - 4);
+    Term.rich(x + 2, y + h - 1, ' {w}←→{/} girar {w}↑↓{/} acel. {w}ESPACIO{/} ejecutar {w}X{/} altitud {w}E{/} evasiva {w}B{/} bengala {w}R{/} kit {w}TAB{/} objetivo {w}F{/} fuego {w}Z{/} zoom {w}C{/} centrar {w}M{/} mapa ', COL.o3, COL.panel, w - 4);
   },
 
   drawSideButtons(L, cy, S) {
@@ -706,11 +804,23 @@ const Flight = {
       } else Term.rich(x + 2, cy, '{m}OBJETIVO:{/} {g}ninguno (TAB / clic){/}', COL.cream, COL.panel, w - 4);
       cy++;
     }
+    const ci = G.contractInfo();
+    if (ci && cy + 1 < L.side.y + L.side.h - 1) {
+      const col = ci.ok ? '{n}' : '{y}';
+      Term.rich(x + 2, cy, `{m}ENCARGO:{/} ${col}${ci.progTxt}${ci.ok && ci.live ? ' ✓' : ''}{/} {g}(${ci.reward}){/}`, COL.cream, COL.panel, w - 4);
+      Term.rich(x + 2, cy + 1, `{g}${ci.txt}{/}`, COL.cream, COL.panel, w - 4);
+      if (UI.hit(x + 1, cy, w - 2, 2)) UI.tip = { title: 'ENCARGO DEL MINISTERIO', lines: [ci.txt + '.', `Recompensa al aterrizar: ${ci.reward}.`, ci.live ? '' : '{g}Se comprueba al aterrizar.{/}'] };
+      cy += 2;
+    }
+    if (st.perks.length && cy < L.side.y + L.side.h - 1) {
+      Term.rich(x + 2, cy, `{m}TALENTOS:{/} ${st.perks.map(k => PERKS[k].n).join(', ')}`, COL.o2, COL.panel, w - 4);
+      if (UI.hit(x + 1, cy, w - 2, 1)) UI.tip = { title: 'TALENTOS DEL PILOTO', lines: st.perks.map(k => `{b}${PERKS[k].n}{/}: ${PERKS[k].d}`) };
+      cy++;
+    }
     const rest = L.side.y + L.side.h - 1 - cy;
     const tips = [
-      '{g}Arrastra módulos entre ranuras y bodega.{/}',
+      '{g}Rueda / Z: zoom · botón central: desplazar mapa.{/}',
       '{g}Reconfigurar en vuelo cuesta 1 turno.{/}',
-      '{g}Clic en una flecha del mapa: ejecutarla.{/}',
     ];
     for (let k = 0; k < Math.min(rest, tips.length); k++) Term.rich(x + 2, cy + k, tips[k], COL.grey, COL.panel, w - 4);
   },
@@ -721,13 +831,23 @@ const Flight = {
     const st = G.st;
     if (!st || !this.L) return;
     const L = this.L, P = st.plane, S = G.calc();
-    const view = { ox: L.map.x, oy: L.map.y, camX: this.icx, camY: this.icy, w: L.map.w, h: L.map.h };
-    const cw = Term.cw, chh = Term.ch;
-    const toPx = (wx, wy) => [(view.ox + wx - view.camX) * cw, (view.oy + wy - view.camY) * chh];
+    const z = this.zoom;
+    const view = { ox: L.map.x, oy: L.map.y, camX: this.icx, camY: this.icy, w: L.map.w, h: L.map.h, z };
+    const cw = Term.cw * z, chh = Term.ch * z;
+    const toPx = (wx, wy) => [(view.ox + (wx - view.camX) * z) * Term.cw, (view.oy + (wy - view.camY) * z) * Term.ch];
     ctx.save();
-    ctx.beginPath(); ctx.rect(view.ox * cw, view.oy * chh, view.w * cw, view.h * chh); ctx.clip();
-    ctx.font = Term.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.beginPath(); ctx.rect(view.ox * Term.cw, view.oy * Term.ch, view.w * Term.cw, view.h * Term.ch); ctx.clip();
+    const bigF = z > 1 ? Term.fontBig : Term.font;
+    ctx.font = bigF; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const t = now();
+    const label = (s, px, py, col, above) => {
+      ctx.font = Term.font;
+      const wpx = ctx.measureText(s).width + 4;
+      const ly = above ? py - Term.ch * 0.95 : py + chh;
+      ctx.globalAlpha = 0.85; ctx.fillStyle = COL.bg; ctx.fillRect(px + cw / 2 - wpx / 2, ly, wpx, Term.ch * 0.9);
+      ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.fillText(s, px + cw / 2, ly + Term.ch * 0.45);
+      ctx.font = bigF;
+    };
     // fragmentos: destellos
     if (Math.random() < 0.3) {
       for (const k in st.map.items) {
@@ -735,6 +855,19 @@ const Flight = {
         if (it.type !== 'frag' && it.type !== 'nucleo') continue;
         const x = k % st.map.w, y = (k / st.map.w) | 0;
         if (G.visDist(x, y) <= S.visR && Math.random() < 0.15) FX.sparkle(x, y, COL.cyan);
+      }
+    }
+    // detalle ×2: estructuras de tierra con integridad y recarga
+    if (z > 1) {
+      for (const gg of G.groundList()) {
+        if (!st.map.seen[gg.idx] || !G.isVisible(gg.x, gg.y, S)) continue;
+        const [px, py] = toPx(gg.x, gg.y);
+        const def = GROUND[gg.g.type];
+        label(`${gg.g.hp}/${gg.g.maxHp}${gg.g.type === 'sam' && gg.g.cd ? ' ⟳' + gg.g.cd : ''}`, px, py, COL.red);
+        if (def.range && cheb(P.x, P.y, gg.x, gg.y) <= def.range && (gg.g.type !== 'sam' || P.alt === 1)) {
+          ctx.globalAlpha = 0.5 + 0.3 * Math.sin(t * 6); ctx.strokeStyle = COL.red; ctx.lineWidth = 1;
+          ctx.strokeRect(px + 1, py + 1, cw - 2, chh - 2); ctx.globalAlpha = 1;
+        }
       }
     }
     // enemigos
@@ -745,15 +878,30 @@ const Flight = {
       const inVis = G.visDist(e.x, e.y) <= S.visR;
       ctx.fillStyle = COL.bg; ctx.fillRect(px, py, cw, chh);
       ctx.fillStyle = inVis ? def.c : dimc(def.c, 0.6);
-      ctx.shadowColor = def.c; ctx.shadowBlur = inVis ? 8 : 0;
-      ctx.fillText(inVis ? def.g : '?', px + cw / 2, py + chh / 2 + 1);
+      ctx.shadowColor = def.c; ctx.shadowBlur = inVis ? 8 * z : 0;
+      ctx.fillText(inVis ? def.g : '?', px + cw / 2, py + chh / 2 + z);
       ctx.shadowBlur = 0;
       // indicador de rumbo
-      ctx.globalAlpha = 0.6; ctx.fillStyle = def.c;
-      ctx.fillRect(px + cw / 2 + DX[e.h] * cw * 0.45 - 1, py + chh / 2 + DY[e.h] * chh * 0.42 - 1, 2, 2);
+      ctx.globalAlpha = 0.7; ctx.fillStyle = def.c;
+      const ps = 2 * z;
+      ctx.fillRect(px + cw / 2 + DX[e.h] * cw * 0.45 - ps / 2, py + chh / 2 + DY[e.h] * chh * 0.42 - ps / 2, ps, ps);
       ctx.globalAlpha = 1;
       // barra de vida
-      if (e.hp < e.maxHp) { ctx.fillStyle = COL.dred; ctx.fillRect(px, py + chh - 2, cw, 2); ctx.fillStyle = COL.red; ctx.fillRect(px, py + chh - 2, cw * e.hp / e.maxHp, 2); }
+      if (e.hp < e.maxHp) { ctx.fillStyle = COL.dred; ctx.fillRect(px, py + chh - 2 * z, cw, 2 * z); ctx.fillStyle = COL.red; ctx.fillRect(px, py + chh - 2 * z, cw * e.hp / e.maxHp, 2 * z); }
+      if (z > 1 && inVis) {
+        const aware = e.aware > 0 || st.alert >= 50;
+        label(`${def.n.split(' ')[1] || def.n} ${e.hp}${aware ? ' !' : ''}`, px, py, aware ? COL.red : dimc(def.c, 0.8));
+        if (def.w.length) { // arco de tiro del enemigo
+          const w = def.w[0];
+          ctx.globalAlpha = 0.25; ctx.strokeStyle = def.c; ctx.lineWidth = 1;
+          ctx.beginPath();
+          const cxp = px + cw / 2, cyp = py + chh / 2, rr = w.range * cw;
+          const a0 = Math.atan2(DY[e.h], DX[e.h]);
+          if (w.arc === 'T') ctx.ellipse(cxp, cyp, rr, w.range * chh, 0, 0, Math.PI * 2);
+          else { ctx.moveTo(cxp, cyp); ctx.ellipse(cxp, cyp, rr, w.range * chh, 0, a0 - 0.68, a0 + 0.68); ctx.closePath(); }
+          ctx.stroke(); ctx.globalAlpha = 1;
+        }
+      }
     }
     // objetivo marcado
     const tgt = st.targetId && (st.enemies.find(e => e.id === st.targetId && G.enemyVisible(e, S)) || G.groundById(st.targetId));
@@ -761,18 +909,26 @@ const Flight = {
       const [px, py] = toPx(tgt.dx != null ? tgt.dx : tgt.x, tgt.dy != null ? tgt.dy : tgt.y);
       const pulse = 0.5 + 0.5 * Math.sin(t * 8);
       ctx.fillStyle = pulse > 0.5 ? COL.yellow : COL.red;
-      ctx.fillText('[', px - cw * 0.5, py + chh / 2 + 1);
-      ctx.fillText(']', px + cw * 1.5, py + chh / 2 + 1);
+      ctx.fillText('[', px - cw * 0.35, py + chh / 2 + z);
+      ctx.fillText(']', px + cw * 1.35, py + chh / 2 + z);
     }
     // jugador
     if (st.phase !== 'dead') {
       const [px, py] = toPx(P.dx, P.dy);
+      if (!P.alt) { ctx.globalAlpha = 0.35; ctx.fillStyle = '#000'; ctx.fillRect(px + 2 * z, py + 2 * z, cw, chh); ctx.globalAlpha = 1; }
       ctx.fillStyle = P.alt ? COL.hi2 : COL.o6; ctx.fillRect(px, py, cw, chh);
       ctx.fillStyle = P.alt ? COL.white : COL.o2;
-      ctx.shadowColor = COL.o1; ctx.shadowBlur = 10;
-      ctx.fillText(ARROWS[P.h], px + cw / 2, py + chh / 2 + 1);
+      ctx.shadowColor = st.evading ? COL.white : COL.o1; ctx.shadowBlur = 10 * z;
+      ctx.fillText(ARROWS[P.h], px + cw / 2, py + chh / 2 + z);
       ctx.shadowBlur = 0;
-      if (!P.alt) { ctx.globalAlpha = 0.35; ctx.fillStyle = COL.o2; ctx.fillText('·', px + cw / 2 + 2, py + chh / 2 + 4); ctx.globalAlpha = 1; }
+      if (z > 1) {
+        // alas del T-0 a los lados del rumbo
+        const lw = (P.h + 6) % 8, rw = (P.h + 2) % 8;
+        ctx.font = Term.font; ctx.fillStyle = P.alt ? COL.cream : COL.o3;
+        for (const d of [lw, rw]) ctx.fillText(d % 2 ? '·' : (d === 2 || d === 6 ? '─' : '│'), px + cw / 2 + DX[d] * cw * 0.42, py + chh / 2 + DY[d] * chh * 0.42);
+        ctx.font = bigF;
+        label(`vel ${P.s} · ${P.alt ? 'ALTA' : 'BAJA'}`, px, py, COL.cream, true);
+      }
     }
     ctx.restore();
     FX.draw(ctx, view);
@@ -791,7 +947,9 @@ const Flight = {
       '',
       `{m}Objetivo:{/} aterrizar en {y}${def.field}{/}, al este.`,
       def.nucleo ? '{m}Objetivo principal:{/} recuperar el {c}◉ Núcleo{/} del epicentro.' : `{m}Secundario:{/} recuperar {c}◊ fragmentos{/} (${def.frags} estimados en el sector).`,
-      `{m}Inteligencia:{/} ${def.radars} radares Ж, ${def.aa} baterías Ш, ${def.storms} frentes de tormenta${def.anom ? ', anomalías §' : ''}.`,
+      `{m}Inteligencia:{/} ${def.radars} radares Ж, ${def.aa} baterías Ш${def.sams ? `, ${def.sams} lanzamisiles Ψ` : ''}, ${def.storms} frentes de tormenta${def.anom ? ', anomalías §' : ''}.`,
+      `{m}Meteorología:{/} viento hacia el ${DIRN[st.wind.d]} (fuerza ${st.wind.s}). Hora de despegue: ${G.clockStr()} (${G.dayPhase()}).`,
+      ...(G.contractInfo() ? [`{m}Encargo del Ministerio:{/} {y}${G.contractInfo().txt}{/} — recompensa ${G.contractInfo().reward}.`] : []),
     ];
     const lines = [];
     for (const l of txt) lines.push(...Term.wrap(l, w - 6));
@@ -873,7 +1031,10 @@ const Flight = {
     if (st.phase === 'briefing') { if (k === 'Enter' || k === ' ') this.startFlight(); if (k === 'Escape') this.pause = !this.pause; return; }
     if (this.showMap) { if (kl === 'm' || k === 'Escape') this.showMap = false; return; }
     if (this.pause) { if (k === 'Escape') this.pause = false; return; }
+    if (st.event && st.phase === 'flight') { if (k === '1' || k === '2') G.resolveEvent(+k - 1); return; }
     if (k === 'Escape') { this.pause = true; return; }
+    if (kl === 'z') { this.setZoom(this.zoom === 1 ? 2 : 1); return; }
+    if (kl === 'c') { this.center(); return; }
     if (st.phase !== 'flight') return;
     const S = G.calc();
     if (k === 'ArrowLeft' || kl === 'a') { st.pTurn = Math.max(-S.man, st.pTurn - 1); Sound.play('hover'); }
@@ -885,6 +1046,28 @@ const Flight = {
     else if (k === 'Tab') G.cycleTarget();
     else if (kl === 'f') this.toggleFire();
     else if (kl === 'm') this.showMap = true;
+    else if (kl === 'e') G.toggleEvade();
+    else if (kl === 'b') G.useFlare();
+    else if (kl === 'r') G.useKit();
+  },
+
+  drawEvent() {
+    const st = G.st, ev = st.event, def = G.eventDef(ev);
+    Term.layer('top');
+    const w = Math.min(72, Term.cols - 4), x = Math.floor((Term.cols - w) / 2);
+    const lines = Term.wrap(def.text, w - 6);
+    const h = lines.length + 11;
+    const y = Math.max(2, Math.floor((Term.rows - h) / 2) - 3);
+    Term.box(x, y, w, h, COL.yellow, COL.panel2, '[RADIO] ' + def.title, COL.yellow, true);
+    lines.forEach((l, j) => Term.rich(x + 3, y + 2 + j, l, COL.cream, COL.panel2));
+    const by = y + lines.length + 3;
+    def.opts.forEach(([label, tip], i) => {
+      const yy = by + i * 3;
+      const dis = ev.id === 'desertor' && i === 0 && st.scrap < 15;
+      UI.button(x + 3, yy, `${i + 1} · ${label}`, { w: 28, col: i === 0 ? COL.yellow : COL.o2, disabled: dis, onClick: () => G.resolveEvent(i) });
+      Term.wrap(tip, w - 36).slice(0, 2).forEach((l, j) => Term.text(x + 33, yy + j, l, COL.grey, COL.panel2, w - 36));
+    });
+    Term.layer('base');
   },
 };
 
@@ -896,7 +1079,8 @@ const Hangar = {
     if (!st || st.phase !== 'hangar') { Screens.set(st ? Flight : Title); return; }
     const C = Term.cols, Rr = Term.rows, P = st.plane, S = G.calc();
     Term.clear(COL.bg);
-    UI.disabled = !!Modal.cur;
+    const perkModal = !!(st.hangar.perkChoices && st.hangar.perkChoices.length);
+    UI.disabled = !!Modal.cur || perkModal;
     // barra superior
     Term.fill(0, 0, C, 1, ' ', COL.o1, COL.o6);
     let x = 1;
@@ -943,14 +1127,25 @@ const Hangar = {
       if (hov) { const tp = modTip(m); tp.lines.push(afford ? '{g}Clic: comprar a la bodega · Arrastrar: a ranura o bodega{/}' : '{r}No te lo puedes permitir.{/}'); UI.tip = tp; }
     });
     y += 14;
-    // desguace
-    const scrapOk = UI.dropHover(mx, y, mw, 3, p => p.from !== 'shop');
-    Term.box(mx, y, mw, 3, scrapOk ? COL.yellow : COL.o4, scrapOk ? COL.hi2 : COL.panel, 'DESGUACE', scrapOk ? COL.yellow : COL.o2);
-    Term.text(mx + 2, y + 1, UI.drag ? '► suelta aquí para convertir en chatarra' : 'Arrastra aquí un módulo: chatarra', scrapOk ? COL.yellow : COL.o4, scrapOk ? COL.hi2 : COL.panel);
-    UI.region(mx, y, mw, 3, { drop: { accept: p => p.from !== 'shop', onDrop: p => { if (G.move(p, { to: 'scrap' })) { G.save(); FX.burst(mx + mw / 2, y + 1, { n: 12, chars: '¤*·', speed: 5 }); } } } });
+    // desguace y taller
+    const dw = Math.floor(mw / 2), tw2 = mw - dw;
+    const scrapOk = UI.dropHover(mx, y, dw, 3, p => p.from !== 'shop');
+    Term.box(mx, y, dw, 3, scrapOk ? COL.yellow : COL.o4, scrapOk ? COL.hi2 : COL.panel, 'DESGUACE', scrapOk ? COL.yellow : COL.o2);
+    Term.text(mx + 2, y + 1, UI.drag ? '► convertir en ¤' : 'módulo → chatarra', scrapOk ? COL.yellow : COL.o4, scrapOk ? COL.hi2 : COL.panel, dw - 3);
+    UI.region(mx, y, dw, 3, { drop: { accept: p => p.from !== 'shop', onDrop: p => { if (G.move(p, { to: 'scrap' })) { G.save(); FX.burst(mx + dw / 2, y + 1, { n: 12, chars: '¤*·', speed: 5 }); } } } });
+    const upOk = p => p.from !== 'shop' && G.upgradeCost(G.getMod(p)) != null && st.scrap >= G.upgradeCost(G.getMod(p));
+    const tx0 = mx + dw;
+    const wsOk = UI.dropHover(tx0, y, tw2, 3, upOk);
+    const dragM = UI.drag && UI.drag.payload.from !== 'shop' ? G.getMod(UI.drag.payload) : null;
+    Term.box(tx0, y, tw2, 3, wsOk ? COL.yellow : COL.o4, wsOk ? COL.hi2 : COL.panel, 'TALLER', wsOk ? COL.yellow : COL.o2);
+    let wsTxt = 'mejorar calidad';
+    if (dragM) { const c = G.upgradeCost(dragM); wsTxt = c == null ? 'no mejorable' : `→ ${TIERS[dragM.tier + 1].n} ${c}¤`; }
+    Term.text(tx0 + 2, y + 1, wsTxt, wsOk ? COL.yellow : dragM ? COL.cream : COL.o4, wsOk ? COL.hi2 : COL.panel, tw2 - 3);
+    UI.region(tx0, y, tw2, 3, { drop: { accept: upOk, onDrop: p => { if (G.upgrade(p)) FX.burst(tx0 + tw2 / 2, y + 1, { n: 16, chars: '*+·', speed: 5, cols: [COL.white, COL.yellow, COL.o2] }); } } });
+    if (UI.hit(tx0, y, tw2, 3) && !UI.drag) UI.tip = { title: 'TALLER', lines: ['Arrastra un módulo para subir su calidad un nivel', '(hasta Prototipo). Mejora sus prestaciones y su', 'integridad. Un módulo Defectuoso pierde sus defectos.', `Coste: 12 / 22 / 36 ¤ según calidad${G.priceMul() < 1 ? ' (−25%)' : ''}.`] };
     y += 4;
     // servicios
-    Term.box(mx, y, mw, 11, COL.o4, COL.panel, 'SERVICIOS', COL.o2);
+    Term.box(mx, y, mw, 15, COL.o4, COL.panel, 'SERVICIOS', COL.o2);
     const tw = mw - 20;
     const rc = G.repairCost();
     Term.rich(mx + 2, y + 2, `Reparar todo: {w}${rc}{/} ¤`, COL.cream, null, tw);
@@ -964,7 +1159,12 @@ const Hangar = {
     Term.rich(mx + 2, y + 8, `Rearmar: {w}${ac}{/} ¤`, COL.cream, null, tw);
     Term.rich(mx + 2, y + 9, '{g}cohetes 2 ¤ · bombas 3 ¤{/}', COL.cream, null, tw);
     UI.button(mx + mw - 17, y + 8, 'REARMAR', { w: 15, disabled: ac === 0 || st.scrap < 2, onClick: () => { G.rearm(); Sound.play('pick'); } });
-    y += 12;
+    for (const [k, yy] of [['flares', y + 11], ['kits', y + 12]]) {
+      const c = CONSUMABLES[k], pr = G.consumablePrice(k);
+      Term.rich(mx + 2, yy, `${c.g} ${c.n}: {w}${st.items[k]}{/}  {g}${pr} ¤{/}`, COL.cream, null, tw);
+      UI.button(mx + mw - 17, yy, 'COMPRAR', { w: 15, disabled: st.scrap < pr, onClick: () => G.buyConsumable(k), tip: { title: c.n.toUpperCase(), lines: Term.wrap(c.d, 44) } });
+    }
+    y += 16;
 
     // columna informe
     const rx = mx + mw + 1, rw = C - rx - 1;
@@ -977,13 +1177,15 @@ const Hangar = {
         `Fragmentos recuperados: {c}${st.stats.frags}{/}`,
         `Instalaciones destruidas: {w}${st.stats.ground}{/}`,
         `Módulos perdidos: {w}${st.stats.modsLost}{/}`,
+        ...(st.hangar.contract ? [`Encargo: ${st.hangar.contract.result === 'ok' ? '{n}cumplido{/}' : '{r}no cumplido{/}'} {g}(${G.contractInfo(st.hangar.contract).txt}){/}`] : []),
+        ...(st.perks.length ? ['', `{y}TALENTOS{/} ${st.perks.map(k => PERKS[k].n).join(' · ')}`] : []),
         '',
         `{y}PRÓXIMO SECTOR ${st.sector + 2}/5{/}`,
         `{b}${next.name}{/}`,
         next.desc,
         '',
         `{m}Destino:{/} ${next.field}`,
-        `{m}Radares:{/} ${next.radars}  {m}Antiaéreos:{/} ${next.aa}  {m}Tormentas:{/} ${next.storms}`,
+        `{m}Radares:{/} ${next.radars}  {m}Antiaéreos:{/} ${next.aa}  {m}SAM:{/} ${next.sams}  {m}Tormentas:{/} ${next.storms}`,
         '',
         `{m}Previsión de tu T-0:{/} velocidad máx. {w}${S.maxS}{/}, autonomía aprox. {w}${S.cons > 0 ? Math.floor(P.fuel / G.fuelUse(S, Math.max(1, S.maxS - 1), 1)) : '∞'}{/} turnos.`,
       ];
@@ -996,7 +1198,27 @@ const Hangar = {
     }
     UI.button(1, Rr - 1, 'MENÚ', { w: 10, col: COL.o3, onClick: () => Modal.confirm('¿Guardar y volver al menú principal?', () => { G.save(); Screens.set(Title); }) });
     UI.disabled = false;
+    if (perkModal) this.drawPerks();
     Modal.draw();
+  },
+  drawPerks() {
+    const st = G.st, ch = st.hangar.perkChoices;
+    Term.layer('top');
+    const cw = 30, w = cw * 3 + 8, h = 15;
+    const x = Math.floor((Term.cols - w) / 2), y = Math.floor((Term.rows - h) / 2);
+    Term.fill(0, 1, Term.cols, Term.rows - 1, ' ', COL.bg, '#060403');
+    Term.box(x, y, w, h, COL.yellow, COL.panel2, 'EXPEDIENTE DEL PILOTO · NUEVO TALENTO', COL.yellow, true);
+    Term.text(x + 3, y + 2, 'El Mando reconoce tu servicio. Elige un talento para el resto de la misión:', COL.cream, COL.panel2, w - 6);
+    ch.forEach((k, i) => {
+      const bx = x + 3 + i * (cw + 1), by = y + 4;
+      const hov = UI.hit(bx, by, cw, 8);
+      Term.box(bx, by, cw, 8, hov ? COL.yellow : COL.o4, hov ? COL.hi : COL.panel, null);
+      Term.text(bx + 2, by + 1, `${i + 1}. ${PERKS[k].n.toUpperCase()}`, hov ? COL.yellow : COL.o2, hov ? COL.hi : COL.panel, cw - 4);
+      Term.wrap(PERKS[k].d, cw - 4).forEach((l, j) => Term.text(bx + 2, by + 3 + j, l, COL.cream, hov ? COL.hi : COL.panel));
+      UI.region(bx, by, cw, 8, { onClick: () => G.choosePerk(k) });
+    });
+    Term.text(x + 3, y + h - 2, 'Clic en una tarjeta o teclas 1 / 2 / 3.', COL.o4, COL.panel2);
+    Term.layer('base');
   },
   takeOff() {
     const S = G.calc();
@@ -1011,6 +1233,8 @@ const Hangar = {
   },
   key(e) {
     if (Modal.cur) return Modal.key(e);
+    const ch = G.st && G.st.hangar && G.st.hangar.perkChoices;
+    if (ch && ch.length) { const i = +e.key - 1; if (i >= 0 && i < ch.length) G.choosePerk(ch[i]); return; }
     if (e.key === 'Escape') Modal.confirm('¿Guardar y volver al menú principal?', () => { G.save(); Screens.set(Title); });
   },
 };

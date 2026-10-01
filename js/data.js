@@ -44,11 +44,15 @@ const ITEMS = {
   factory: { g: 'Ω', c: '#ffa040', n: 'Fábrica abandonada', d: 'Vuela bajo y despacio para saquear un módulo de mejor calidad.' },
   depot: { g: '⌂', c: COL.yellow, n: 'Depósito de combustible', d: 'Vuela bajo y despacio para repostar en vuelo.' },
   nucleo: { g: '◉', c: COL.cyan, n: 'EL NÚCLEO', d: 'El corazón del Objeto. Recógelo en baja altitud y llévalo a la pista de evacuación.' },
+  survivor: { g: '@', c: COL.yellow, n: 'Piloto derribado', d: 'Un aviador superviviente. Vuela bajo y despacio para rescatarlo.' },
+  cache: { g: '■', c: COL.yellow, n: 'Contenedor de suministros', d: 'Lanzado en paracaídas. Vuela bajo y despacio para engancharlo.' },
+  signal: { g: '?', c: COL.yellow, n: 'Origen de la señal', d: 'Algo emite en una frecuencia del OKB. Vuela bajo sobre ello para investigar.' },
 };
 
 const GROUND = {
   radar: { g: 'Ж', c: COL.red, n: 'Estación de radar «P-12»', hp: 18, scrap: 8, score: 40, d: 'Detecta aviones en altitud alta (radio 14) y baja (radio 5). Eleva la alerta.' },
   aa: { g: 'Ш', c: COL.red, n: 'Batería antiaérea «KS-19»', hp: 24, scrap: 10, score: 50, range: 5, dmg: [3, 7], acc: 32, d: 'Dispara en radio 5. Más precisa contra aviones en altitud baja.' },
+  sam: { g: 'Ψ', c: COL.red, n: 'Lanzamisiles SAM «Dvina»', hp: 22, scrap: 14, score: 90, range: 9, dmg: [6, 11], acc: 50, reload: 2, d: 'Misiles de largo alcance (9). Solo alcanzan a aviones en altitud ALTA. Recarga en 2 turnos.' },
 };
 
 const ENEMY = {
@@ -64,31 +68,31 @@ const SECTORS = [
     name: 'Taiga de Tomsk', field: 'Aeródromo de Kolpashevo',
     desc: 'Bosque infinito y ríos helados. La Dirección K apenas tiene presencia aquí: algunos exploradores y cazas ligeros. Buen lugar para aprender a volar el T-0.',
     forest: 0.58, mtn: 0.0, water: 0.10, rivers: 1, cities: 1, citySize: 1, radars: 1, aa: 1, wrecks: 6, frags: 5, depots: 3,
-    storms: 1, anom: 0, patrols: 1, pool: [['scout', 3], ['yak', 3]], maxE: 3,
+    sams: 0, storms: 1, anom: 0, patrols: 1, pool: [['scout', 3], ['yak', 3]], maxE: 3,
   },
   {
     name: 'Llanura del Yeniséi', field: 'Aeródromo de Yeniseisk',
     desc: 'Llanura abierta: poca cobertura y radares en cada colina. Los primeros MiG de la Dirección K han sido avistados.',
     forest: 0.32, mtn: 0.02, water: 0.16, rivers: 2, cities: 2, citySize: 1, radars: 2, aa: 3, wrecks: 6, frags: 6, depots: 3,
-    storms: 2, anom: 0, patrols: 2, pool: [['scout', 2], ['yak', 4], ['mig', 1]], maxE: 4,
+    sams: 0, storms: 2, anom: 0, patrols: 2, pool: [['scout', 2], ['yak', 4], ['mig', 1]], maxE: 4,
   },
   {
     name: 'Meseta de Putorana', field: 'Base aérea de Tura',
     desc: 'Mesetas basálticas y cañones profundos. Volar bajo es arriesgado entre tantas montañas, pero volar alto te expone a los radares.',
     forest: 0.22, mtn: 0.13, water: 0.10, rivers: 1, cities: 1, citySize: 1, radars: 2, aa: 4, wrecks: 7, frags: 7, depots: 3,
-    storms: 3, anom: 0, patrols: 2, pool: [['yak', 3], ['mig', 2], ['heavy', 1]], maxE: 4,
+    sams: 1, storms: 3, anom: 0, patrols: 2, pool: [['yak', 3], ['mig', 2], ['heavy', 1]], maxE: 4,
   },
   {
     name: 'Krasnoyarsk-26', field: 'Pista secreta de Vanavara',
     desc: 'Ciudad cerrada. No figura en ningún mapa. Fábricas, antiaéreos y el cuartel general de la Dirección K. Las primeras anomalías aparecen en el cielo.',
     forest: 0.26, mtn: 0.03, water: 0.08, rivers: 1, cities: 4, citySize: 2, radars: 4, aa: 7, wrecks: 7, frags: 7, depots: 3,
-    storms: 2, anom: 3, patrols: 3, pool: [['yak', 2], ['mig', 3], ['heavy', 2]], maxE: 5,
+    sams: 2, storms: 2, anom: 3, patrols: 3, pool: [['yak', 2], ['mig', 3], ['heavy', 2]], maxE: 5,
   },
   {
     name: 'Epicentro de Tunguska', field: 'Pista de evacuación «Rassvet»',
     desc: 'Árboles abatidos en círculos perfectos. El aire vibra. En el centro espera el Núcleo... y los Ecos que lo protegen. Sin el Núcleo no hay aterrizaje.',
     forest: 0.5, mtn: 0.03, water: 0.08, rivers: 1, cities: 0, citySize: 1, radars: 2, aa: 4, wrecks: 8, frags: 9, depots: 3,
-    storms: 3, anom: 12, patrols: 3, pool: [['mig', 2], ['eco', 4], ['heavy', 1]], maxE: 6, nucleo: true,
+    sams: 2, storms: 3, anom: 12, patrols: 3, pool: [['mig', 2], ['eco', 4], ['heavy', 1]], maxE: 6, nucleo: true,
   },
 ];
 
@@ -156,6 +160,25 @@ const MOD_T = {
     { kind: 'sigilo', base: 'Revestimiento absorbente', models: ['P-3', 'P-7'], sys: { stealth: 35 }, mass: 2, hp: 10, cov: 8, w: 1.2, min: 1 },
     { kind: 'postquemador', base: 'Postquemador', models: ['F-1', 'F-2'], sys: { burner: 1 }, mass: 2, hp: 10, cov: 7, w: 1.2, min: 1 },
   ],
+};
+
+const PERKS = {
+  as: { n: 'As del viraje', d: 'Los virajes cerrados de 90° no te hacen perder velocidad.' },
+  mecanico: { n: 'Mecánico de vuelo', d: 'Reparas 1 punto de integridad por turno en vuelo.' },
+  halcon: { n: 'Ojo de halcón', d: '+3 de visión, de día y de noche.' },
+  tirador: { n: 'Tirador de élite', d: '+10 de puntería con todas las armas.' },
+  navegante: { n: 'Navegante', d: '−12% de consumo de combustible.' },
+  fantasma: { n: 'Fantasma', d: '+20% de sigilo frente a los radares.' },
+  chatarrero: { n: 'Chatarrero', d: '+40% de chatarra obtenida en vuelo.' },
+  estibador: { n: 'Estibador', d: '+2 huecos de bodega.' },
+  temple: { n: 'Temple de acero', d: '+25 de estructura máxima (y reparada).' },
+  contrabandista: { n: 'Contrabandista', d: '−25% en el almacén, los consumibles y el taller.' },
+  reflejos: { n: 'Reflejos', d: 'La evasiva no gasta combustible y se recupera en 2 turnos.' },
+};
+
+const CONSUMABLES = {
+  flares: { n: 'Bengalas', g: '*', price: 8, d: 'Rompen el blocaje enemigo: −40% de precisión enemiga este turno, los cazas te pierden y la alerta baja 10.' },
+  kits: { n: 'Kits de reparación', g: '+', price: 12, d: 'Reparación de emergencia: +20 de estructura y +12 al módulo más dañado. No cuesta turno.' },
 };
 
 const SYSN = {
@@ -234,7 +257,14 @@ const INSTR = [
     '  {w}↑ / W{/}  acelerar (+1)                 {w}↓ / S{/}  desacelerar (−1)',
     '  {w}ESPACIO / ENTER{/}  ejecutar la maniobra programada',
     '  {w}X{/}  cambiar de altitud      {w}TAB{/}  siguiente objetivo      {w}F{/}  fuego auto / retener',
-    '  {w}M{/}  mapa del sector         {w}ESC{/}  menú                     {w}+ / −{/}  tamaño de letra',
+    '  {w}E{/}  evasiva (tonel)         {w}B{/}  bengalas                 {w}R{/}  kit de reparación',
+    '  {w}Z{/}  zoom ×1 / ×2            {w}C{/}  centrar la cámara        {w}M{/}  mapa del sector',
+    '  {w}ESC{/}  menú                  {w}+ / −{/}  tamaño de letra',
+    '',
+    '{y}RATÓN{/}: todas las acciones tienen botón en la barra sobre el mapa. {w}Rueda{/}: zoom (hacia el cursor).',
+    '{w}Botón central{/} (o arrastrar con el izquierdo en una zona vacía): desplazar el mapa. Al ejecutar',
+    'un turno la cámara vuelve a seguir al T-0. En zoom ×2 verás integridad de enemigos e instalaciones,',
+    'sus arcos de tiro y qué amenazas te tienen a su alcance.',
     '',
     'En el mapa verás los {b}destinos posibles{/} de este turno. Pasa el ratón por encima para ver la',
     'trayectoria y haz {w}clic{/} para ejecutarla directamente.',
@@ -287,6 +317,50 @@ const INSTR = [
     '{y}TIERRA{/}: radares y antiaéreos se atacan con {b}bombas{/} (alcance 1) o con cualquier arma',
     'volando en altitud baja.',
   ]],
+  ['TÁCTICAS', [
+    '{y}TONEL EVASIVO{/} ({w}E{/}): programa una maniobra evasiva para el próximo turno. Los enemigos',
+    'tienen −30% de precisión, pero tus armas no disparan. Cuesta 2 de combustible y tarda 4 turnos',
+    'en estar disponible de nuevo.',
+    '',
+    '{y}BENGALAS{/} ({w}B{/}): se lanzan al instante. Durante este turno la precisión enemiga cae un 40%,',
+    'ningún caza puede localizarte y, al acabar el turno, todos te pierden la pista. La alerta baja 10.',
+    '',
+    '{y}KITS DE REPARACIÓN{/} ({w}R{/}): +20 de estructura y +12 al módulo más dañado. No cuestan turno',
+    '(uno por turno). Bengalas y kits se compran en el hangar o aparecen en restos y contenedores.',
+    '',
+    '{y}AVERÍAS{/}: un módulo por debajo del 35% de integridad entra en estado crítico {r}!{/}:',
+    '  · motor: pierde un 40% de empuje y a veces petardea (−1 velocidad)',
+    '  · arma: 35% de encasquillarse cada turno     · tanque: pierde 0.5 de combustible por turno',
+    '  · sistema: fuera de servicio                 · blindaje: a punto de ceder',
+  ]],
+  ['ENTORNO', [
+    '{y}VIENTO{/}: cada sector tiene un viento dominante (barra superior). Volar a favor ahorra hasta',
+    'un 16% de combustible; en contra, cuesta hasta un 16% más. El viento arrastra las tormentas.',
+    'La estimación de consumo de cada maniobra ya lo tiene en cuenta.',
+    '',
+    '{y}DÍA Y NOCHE{/}: cada turno son 15 minutos. De noche ({s}☾{/}) ves 4 casillas menos, pero los cazas',
+    'también te ven peor y los antiaéreos disparan a ciegas (−10%). Los radares no duermen.',
+    '',
+    '{r}Ψ LANZAMISILES SAM{/}: aparecen a partir del sector 3. Alcance 9, solo contra aviones en altitud',
+    '{b}ALTA{/}, y necesitan 2 turnos para recargar. Los antiaéreos castigan volar bajo; los SAM, volar',
+    'alto. Pasa el ratón por encima de una instalación para ver su alcance.',
+  ]],
+  ['CARRERA DEL PILOTO', [
+    '{y}ENCARGOS DEL MINISTERIO{/}: cada sector trae un objetivo secundario (destruir radares, recuperar',
+    'fragmentos, aterrizar sin ser detectado, no perder módulos, reconocer el sector...). Si lo',
+    'cumples al aterrizar, cobras la recompensa. Lo verás en el panel derecho.',
+    '',
+    '{y}EVENTOS DE RADIO{/}: a veces llega una transmisión que exige una decisión: rescatar a un piloto',
+    'derribado {y}@{/}, pagar a un desertor, apagar el radar, pedir suministros {y}■{/}, investigar una señal',
+    'misteriosa {y}?{/}... Elige con el ratón o con las teclas 1 / 2.',
+    '',
+    '{y}TALENTOS{/}: en cada hangar el Mando te ofrece tres talentos; eliges uno y lo conservas toda la',
+    'misión: As del viraje, Mecánico, Ojo de halcón, Tirador, Navegante, Fantasma, Chatarrero,',
+    'Estibador, Temple de acero, Contrabandista, Reflejos.',
+    '',
+    '{y}TALLER{/}: en el hangar, arrastra un módulo al Taller para subir su calidad un nivel (hasta',
+    'Prototipo). Un módulo Defectuoso que pasa por el taller pierde sus defectos.',
+  ]],
   ['MÓDULOS', [
     'El T-0 tiene 13 ranuras: {b}2 motores, 4 armas, 2 tanques, 2 blindajes y 3 sistemas{/}, más una',
     'bodega de 6 huecos. {w}Arrastra y suelta{/} módulos entre ranuras y bodega.',
@@ -321,7 +395,8 @@ const INSTR = [
   ]],
   ['LEYENDA', [
     '{w}→↗↑{/} el T-0 (la flecha indica el rumbo)   {r}v{/} explorador   {r}y{/} caza Yak   {r}M{/} interceptor MiG',
-    '{r}B{/} cañonero   {p}Ф{/} Eco   {r}Ж{/} radar   {r}Ш{/} antiaéreo',
+    '{r}B{/} cañonero   {p}Ф{/} Eco   {r}Ж{/} radar   {r}Ш{/} antiaéreo   {r}Ψ{/} lanzamisiles SAM',
+    '{y}@{/} piloto derribado   {y}■{/} contenedor de suministros   {y}?{/} origen de una señal',
     '',
     '{c}◊{/} fragmento   {c}◉{/} Núcleo   {b}%{/} restos   {b}Ω{/} fábrica   {y}⌂{/} depósito de combustible',
     '{b}={/} pista de aterrizaje   {p}§{/} anomalía   {s}░▒{/} tormenta',
@@ -345,6 +420,9 @@ const INSTR = [
     '· El blindaje es un escudo de sacrificio: repáralo antes de que caiga.',
     '· Lleva la bodega ligera. Cada módulo de repuesto te cuesta velocidad.',
     '· Los cohetes deciden combates: márcale el objetivo correcto.',
+    '· Una bengala a tiempo vale más que diez puntos de blindaje.',
+    '· Planifica la ruta con el viento: a favor llegas más lejos con el mismo combustible.',
+    '· Repara antes de que un módulo entre en avería: los fallos se encadenan.',
     '· El combustible manda. Mira el indicador de la pista y calcula.',
     '· En el epicentro, los Ecos drenan combustible. Entra con los tanques llenos.',
   ]],

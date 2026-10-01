@@ -13,9 +13,33 @@ const Main = {
     const onResize = () => { Term.resize(); };
     window.addEventListener('resize', onResize);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => Term.resize());
-    window.addEventListener('mousemove', e => UI.onMove(e));
-    window.addEventListener('mousedown', e => { Sound.ensure(); UI.onDown(e); });
-    window.addEventListener('mouseup', e => UI.onUp(e));
+    window.addEventListener('mousemove', e => {
+      UI.onMove(e);
+      const sc = Screens.cur;
+      if (sc && sc.panning && sc.panMove) sc.panMove(e);
+    });
+    window.addEventListener('mousedown', e => {
+      Sound.ensure();
+      const sc = Screens.cur;
+      if (e.button === 1) {
+        e.preventDefault();
+        if (sc && sc.panStart) sc.panStart(e, 'mid');
+        return;
+      }
+      UI.onDown(e);
+      // arrastre izquierdo sobre zona vacía del mapa: paneo
+      if (e.button === 0 && !UI.pressed && sc && sc.panStart) sc.panStart(e, 'left');
+    });
+    window.addEventListener('mouseup', e => {
+      const sc = Screens.cur;
+      if (sc && sc.panning) { const moved = sc.panning.moved; sc.panEnd(); if (e.button === 1 || moved) { UI.pressed = null; return; } }
+      UI.onUp(e);
+    });
+    window.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+    window.addEventListener('wheel', e => {
+      const sc = Screens.cur;
+      if (sc && sc.wheel) { sc.wheel(e); e.preventDefault(); }
+    }, { passive: false });
     window.addEventListener('contextmenu', e => e.preventDefault());
     window.addEventListener('keydown', e => this.key(e));
     // táctil básico: toques como clics

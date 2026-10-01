@@ -131,12 +131,13 @@ const Gen = {
       let p = null;
       if (near && R.chance(0.6)) p = randFree(near[0] - 7, near[0] + 7, Math.max(2, near[1] - 5), Math.min(H - 3, near[1] + 5), 80);
       if (!p) p = randFree(22, W - 6);
-      if (p) ground[I(p[0], p[1])] = { type, hp: GROUND[type].hp, maxHp: GROUND[type].hp };
+      if (p) ground[I(p[0], p[1])] = { type, hp: GROUND[type].hp, maxHp: GROUND[type].hp, cd: 0 };
     };
     for (let k = 0; k < def.radars; k++) putGround('radar', cityCenters.length ? R.pick(cityCenters) : null);
     const aaNear = cityCenters.concat([[ex + 3, ey]]);
     if (nuc) aaNear.push(nuc);
     for (let k = 0; k < def.aa; k++) putGround('aa', R.pick(aaNear));
+    for (let k = 0; k < (def.sams || 0); k++) putGround('sam', R.pick(aaNear));
 
     // tormentas
     const storms = [];
@@ -229,3 +230,11 @@ const Gen = {
 
 function modName(m) { return `${m.base} ${m.model}`; }
 function modColor(m) { return TIERS[m.tier].c; }
+function isCrit(m) { return m.hp < m.maxHp * 0.35; }
+const CRIT_TXT = {
+  motor: 'pierde un 40% de empuje y petardea',
+  arma: 'puede encasquillarse',
+  tanque: 'pierde combustible cada turno',
+  blindaje: 'a punto de ceder',
+  sistema: 'fuera de servicio',
+};

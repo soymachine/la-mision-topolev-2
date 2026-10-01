@@ -88,17 +88,17 @@ const FX = {
 
   // view: { ox, oy, camX, camY, w, h }  (ox/oy en celdas de pantalla; w/h tamaño de la vista en celdas)
   draw(ctx, v) {
-    const cw = Term.cw, chh = Term.ch;
-    const toPx = (wx, wy) => [(v.ox + wx - v.camX + 0.5) * cw, (v.oy + wy - v.camY + 0.5) * chh];
+    const cw = Term.cw, chh = Term.ch, z = v.z || 1;
+    const toPx = (wx, wy) => [(v.ox + (wx - v.camX + 0.5) * z) * cw, (v.oy + (wy - v.camY + 0.5) * z) * chh];
     ctx.save();
     ctx.beginPath(); ctx.rect(v.ox * cw, v.oy * chh, v.w * cw, v.h * chh); ctx.clip();
-    ctx.font = Term.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = z > 1 ? Term.fontBig : Term.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const r of this.rings) {
       if (r.t < 0) continue;
       const k = r.t / r.dur;
       const [px, py] = toPx(r.x, r.y);
       ctx.globalAlpha = 1 - k; ctx.strokeStyle = r.col; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.ellipse(px, py, r.r * cw * k * 1.3 + 2, r.r * chh * k * 0.75 + 2, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(px, py, r.r * z * cw * k * 1.3 + 2, r.r * z * chh * k * 0.75 + 2, 0, 0, Math.PI * 2); ctx.stroke();
     }
     for (const p of this.parts) {
       if (p.delay > 0) continue;

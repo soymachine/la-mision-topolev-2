@@ -12,6 +12,8 @@ const G = {
       v: 1, seed, rs: 0, sector: 0, turn: 0, totalTurns: 0, scrap: 30, frags: 0, kills: 0, score: 0, nucleo: false,
       enemies: [], nid: 1, uid: 1, alert: 0, alertLvl: 0, targetId: null, fireMode: 'auto', pendingAlt: false,
       pTurn: 0, pThr: 0, log: [], phase: 'briefing', hangar: null, cause: '', hints: {},
+      perks: [], items: { flares: 2, kits: 1 }, clock: 7.5, wind: { d: 2, s: 1 }, evadeCd: 0, pendingEvade: false,
+      evading: false, flare: 0, blind: 0, event: null, sec: null, contract: null, kitTurn: -1,
       stats: { frags: 0, dmgTaken: 0, shots: 0, hits: 0, ground: 0, modsLost: 0 },
     };
     st.plane = {
@@ -33,11 +35,20 @@ const G = {
   load(data) {
     if (!data || data.v !== 1) return false;
     this.st = data;
+    this.migrate(data);
     this.R = new Rng(data.rs);
     const P = data.plane;
     P.dx = P.x; P.dy = P.y;
     for (const e of data.enemies) { e.dx = e.x; e.dy = e.y; }
     return true;
+  },
+
+  // partidas guardadas con versiones anteriores
+  migrate(st) {
+    const d = { perks: [], items: { flares: 2, kits: 1 }, clock: 7.5, wind: { d: 2, s: 1 }, evadeCd: 0, pendingEvade: false, evading: false, flare: 0, blind: 0, event: null, contract: null, kitTurn: -1 };
+    for (const k in d) if (st[k] === undefined) st[k] = d[k];
+    if (!st.sec) st.sec = { kills: 0, radars: 0, sams: 0, frags: 0, mods: 0, events: 0 };
+    if (st.map) for (const k in st.map.ground) if (st.map.ground[k].cd == null) st.map.ground[k].cd = 0;
   },
 
   save() {
@@ -55,6 +66,10 @@ const G = {
     P.x = st.map.start.x; P.y = st.map.start.y; P.h = 2; P.s = 2; P.alt = 1; P.dx = P.x; P.dy = P.y;
     st.enemies = []; st.alert = 0; st.alertLvl = 0; st.turn = 0; st.targetId = null; st.pendingAlt = false;
     st.pTurn = 0; st.pThr = 0; st.log = [];
+    st.wind = st.sector === 0 ? { d: 2, s: 1 } : { d: this.R.int(0, 7), s: this.R.int(1, 2) };
+    st.sec = { kills: 0, radars: 0, sams: 0, frags: 0, mods: 0, events: 0 };
+    st.event = null; st.blind = 0; st.flare = 0; st.evading = false; st.pendingEvade = false; st.evadeCd = 0;
+    st.contract = this.genContract();
     for (let k = 0; k < def.patrols; k++) this.spawnEnemy(this.R.weighted(def.pool), 'patrol');
     this.reveal();
     st.phase = 'briefing';
@@ -86,15 +101,25 @@ const G = {
       thrust: 0, cons: 0, fuelCap: 40, mass: 12, man: 1, vision: 0, detect: 0, ecm: 0, aim: 0, reso: 0, repair: 0,
       stealth: 0, burner: 0, grab: 0, engines: 0, weapons: 0, armor: 0, fountain: 0, regen: 0,
     };
+    const st = this.st, has = k => st.perks && st.perks.includes(k);
+    s.leak = 0; s.crit = 0;
     P.slots.forEach((m, i) => {
       if (!m) return;
       s.mass += m.mass;
-      if (m.cat === 'motor') { s.thrust += m.thrust; s.cons += m.cons; s.engines++; }
-      else if (m.cat === 'tanque') { s.fuelCap += m.cap; if (m.anom === 'fuente') s.fountain += 0.6; }
+      const crit = isCrit(m);
+      if (crit) s.crit++;
+      if (m.cat === 'motor') { s.thrust += m.thrust * (crit ? 0.6 : 1); s.cons += m.cons; s.engines++; }
+      else if (m.cat === 'tanque') { s.fuelCap += m.cap; if (m.anom === 'fuente') s.fountain += 0.6; if (crit) s.leak += 0.5; }
       else if (m.cat === 'arma') s.weapons++;
       else if (m.cat === 'blindaje') { s.armor++; if (m.anom === 'regen') s.regen++; }
-      else if (m.cat === 'sistema') for (const k in m.sys) s[k] = (s[k] || 0) + m.sys[k];
+      else if (m.cat === 'sistema' && !crit && !(st.blind > 0 && m.kind === 'radar')) for (const k in m.sys) s[k] = (s[k] || 0) + m.sys[k];
     });
+    if (has('halcon')) s.vision += 3;
+    if (has('tirador')) s.aim += 10;
+    if (has('navegante')) s.cons *= 0.88;
+    if (has('fantasma')) s.stealth += 20;
+    if (has('mecanico')) s.repair += 1;
+    s.night = this.dayPhase() === 'noche';
     for (const m of P.cargo) if (m) s.mass += m.mass;
     s.mass += P.fuel / 25;
     s.mass = Math.round(s.mass * 10) / 10;
@@ -106,12 +131,28 @@ const G = {
     s.man = Math.min(3, s.man);
     s.stealth = Math.min(70, s.stealth);
     s.grabLim = 2 + Math.min(2, s.grab);
-    s.visR = (P.alt ? 12 : 8) + s.vision;
+    s.visR = Math.max(4, (P.alt ? 12 : 8) + s.vision - (s.night ? 4 : 0));
     s.detR = Math.max(s.visR, s.detect);
     s.fuelUse = this.fuelUse(s, P.s, P.alt);
     return s;
   },
-  fuelUse(s, speed, alt) { return s.cons * (0.6 + 0.4 * speed) * (alt ? 1 : 1.2); },
+  fuelUse(s, speed, alt, h) {
+    if (h == null) h = this.st.plane.h;
+    return s.cons * (0.6 + 0.4 * speed) * (alt ? 1 : 1.2) * this.windMul(h);
+  },
+  // viento: a favor ahorra hasta un 20%, en contra cuesta hasta un 20%
+  windMul(h) {
+    const w = this.st.wind;
+    if (!w) return 1;
+    return 1 - 0.08 * w.s * Math.cos(((h - w.d + 8) % 8) * Math.PI / 4);
+  },
+  dayPhase() {
+    const c = this.st.clock;
+    if (c >= 21 || c < 5) return 'noche';
+    if (c >= 18.5 || c < 7) return 'crepúsculo';
+    return 'día';
+  },
+  clockStr() { const c = this.st.clock; return `${String(Math.floor(c)).padStart(2, '0')}:${String(Math.round((c % 1) * 60)).padStart(2, '0')}`; },
 
   // ---------- maniobras ----------
   options() {
@@ -123,7 +164,7 @@ const G = {
         if (glide && thr !== 0) continue;
         let ns;
         if (glide) ns = (P.s - 1 <= 0 && P.alt === 1) ? 1 : P.s - 1;
-        else ns = clamp(P.s + thr - (Math.abs(turn) >= 2 ? 1 : 0), 1, S.maxS);
+        else ns = clamp(P.s + thr - (Math.abs(turn) >= 2 && !st.perks.includes('as') ? 1 : 0), 1, S.maxS);
         const nh = (P.h + turn + 8) % 8;
         const key = nh + ':' + ns;
         if (seen[key]) continue;
@@ -145,7 +186,7 @@ const G = {
   },
 
   // ---------- turno ----------
-  canAct() { return this.st && this.st.phase === 'flight' && performance.now() >= this.lock; },
+  canAct() { return this.st && this.st.phase === 'flight' && !this.st.event && performance.now() >= this.lock; },
 
   doTurn(opt) {
     if (!this.canAct()) return;
@@ -155,6 +196,24 @@ const G = {
     this.lock = performance.now() + 230;
     st.pTurn = 0; st.pThr = 0;
     Sound.play('turn');
+    const phase0 = this.dayPhase();
+    st.clock = (st.clock + 0.25) % 24;
+    if (this.dayPhase() !== phase0) {
+      const ph = this.dayPhase();
+      this.log(ph === 'noche' ? 'Cae la noche: menos visión para todos. Los antiaéreos disparan a ciegas.' : ph === 'día' ? 'Amanece sobre la taiga.' : 'Crepúsculo.', COL.o3);
+    }
+    if (st.evadeCd > 0) st.evadeCd--;
+    if (st.blind > 0) { st.blind--; if (!st.blind) this.log('Radar de nuevo en línea.', COL.o3); }
+    st.evading = false;
+    if (st.pendingEvade) {
+      st.pendingEvade = false;
+      st.evading = true;
+      const refl = st.perks.includes('reflejos');
+      st.evadeCd = refl ? 2 : 4;
+      if (!refl) P.fuel = Math.max(0, P.fuel - 2);
+      this.log('¡Tonel! Maniobra evasiva: los enemigos apuntan peor, pero no disparas este turno.', COL.yellow);
+      FX.ring(P.x, P.y, 2, COL.white);
+    }
 
     // altitud
     if (st.pendingAlt) {
@@ -168,6 +227,8 @@ const G = {
 
     P.h = opt.nh;
     P.s = opt.ns;
+    const sick = P.slots.find(m => m && m.cat === 'motor' && isCrit(m));
+    if (sick && P.s > 1 && R.chance(0.12)) { P.s--; this.log(`${modName(sick)} petardea: pierdes velocidad.`, COL.yellow); FX.burst(P.x, P.y, { n: 6, chars: '·*', cols: [COL.grey, COL.dgrey], speed: 2 }); }
     if (opt.dive && P.alt === 1) {
       // sin velocidad en altitud alta: picado para ganar velocidad
       P.alt = 0;
@@ -216,7 +277,8 @@ const G = {
     // combustible
     S = this.calc();
     const use = S.fuelUse * (P.s > 0 ? 1 : 0);
-    P.fuel = Math.max(0, P.fuel - use + S.fountain);
+    P.fuel = Math.max(0, P.fuel - use - S.leak + S.fountain);
+    if (S.leak) this.hint('leak' + st.sector, 'Un tanque dañado pierde combustible. Repáralo o vacíalo.');
     P.fuel = Math.min(P.fuel, S.fuelCap);
     if (P.fuel <= 0 && S.cons > 0 && !st.hints['nofuel' + st.sector]) {
       st.hints['nofuel' + st.sector] = 1;
@@ -249,7 +311,179 @@ const G = {
       this.log('[RADIO] ' + msg, COL.o4);
     }
 
+    if (st.flare) { st.flare = 0; for (const e of st.enemies) e.aware = 0; }
+    if (st.turn >= 6 && st.sec.events < 2 && !st.event && R.chance(0.045)) this.triggerEvent();
+
     if (st.targetId && !st.enemies.find(e => e.id === st.targetId) && !this.groundById(st.targetId)) st.targetId = null;
+    this.save();
+  },
+
+  // ---------- consumibles y evasiva ----------
+  toggleEvade() {
+    const st = this.st;
+    if (st.phase !== 'flight') return false;
+    if (st.evadeCd > 0 && !st.pendingEvade) { this.log(`Evasiva no disponible (${st.evadeCd} turnos).`, COL.grey); Sound.play('deny'); return false; }
+    st.pendingEvade = !st.pendingEvade;
+    Sound.play('click');
+    return true;
+  },
+  useFlare() {
+    const st = this.st, P = st.plane;
+    if (!this.canAct()) return false;
+    if (st.items.flares <= 0 || st.flare) { Sound.play('deny'); return false; }
+    st.items.flares--;
+    st.flare = 1;
+    st.alert = Math.max(0, st.alert - 10);
+    this.log('Bengalas lanzadas: los sistemas de puntería enemigos pierden el blanco.', COL.yellow);
+    for (let k = 0; k < 4; k++) FX.burst(P.x, P.y, { n: 8, speed: 6 + k, chars: '*·+', cols: [COL.white, COL.yellow, COL.o2, COL.o3], life: 1.6, grav: 1.2 });
+    FX.flash(0.15);
+    Sound.play('rocket');
+    this.save();
+    return true;
+  },
+  useKit() {
+    const st = this.st, P = st.plane;
+    if (!this.canAct()) return false;
+    if (st.items.kits <= 0 || st.kitTurn === st.turn) { Sound.play('deny'); return false; }
+    st.items.kits--; st.kitTurn = st.turn;
+    P.structure = Math.min(P.maxStructure, P.structure + 20);
+    const worst = P.slots.filter(m => m && m.hp < m.maxHp).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+    if (worst) worst.hp = Math.min(worst.maxHp, worst.hp + 12);
+    this.log(`Kit de reparación: +20 estructura${worst ? ', ' + modName(worst) + ' +12' : ''}.`, COL.green);
+    FX.burst(P.x, P.y, { n: 12, chars: '+·', cols: [COL.white, COL.green, COL.o3], speed: 3 });
+    Sound.play('pick');
+    this.save();
+    return true;
+  },
+  gainScrap(n) {
+    const v = Math.round(n * (this.st.perks.includes('chatarrero') ? 1.4 : 1));
+    this.st.scrap += v;
+    return v;
+  },
+
+  // ---------- encargos del Ministerio ----------
+  genContract() {
+    const st = this.st, def = SECTORS[st.sector], R = this.R;
+    const pool = [
+      ['frags', 3, () => Math.max(2, def.frags - 2)],
+      ['kills', 3, () => 2 + st.sector],
+      ['stealth', 2, () => 30],
+      ['intact', 2, () => 0],
+      ['explore', 2, () => 45 + st.sector * 3],
+    ];
+    if (def.radars) pool.push(['radar', 3, () => Math.min(2, def.radars)]);
+    if (def.sams) pool.push(['sam', 3, () => 1]);
+    const pick = R.weighted(pool.map(p => [p, p[1]]));
+    return { type: pick[0], n: pick[2](), scrap: R.int(20, 32) + st.sector * 6, frags: R.chance(0.4) ? 1 : 0, paid: false };
+  },
+  contractInfo(c) {
+    const st = this.st;
+    c = c || st.contract;
+    if (!c) return null;
+    const sec = st.sec || {};
+    let prog = 0, txt = '', ok = false, live = true;
+    switch (c.type) {
+      case 'frags': prog = sec.frags; txt = `Recupera ${c.n} fragmentos en este sector`; ok = prog >= c.n; break;
+      case 'kills': prog = sec.kills; txt = `Derriba ${c.n} aparatos de la Dirección K`; ok = prog >= c.n; break;
+      case 'radar': prog = sec.radars; txt = `Destruye ${c.n} estación${c.n > 1 ? 'es' : ''} de radar Ж`; ok = prog >= c.n; break;
+      case 'sam': prog = sec.sams; txt = 'Destruye un lanzamisiles SAM Ψ'; ok = prog >= c.n; break;
+      case 'stealth': prog = Math.round(st.alert); txt = `Aterriza con la alerta por debajo del ${c.n}%`; ok = st.alert < c.n; live = false; break;
+      case 'intact': prog = sec.mods; txt = 'No pierdas ningún módulo en este sector'; ok = sec.mods === 0; live = false; break;
+      case 'explore': {
+        const seen = st.map ? st.map.seen.reduce((a, b) => a + b, 0) / st.map.seen.length * 100 : 0;
+        prog = Math.floor(seen); txt = `Reconoce el ${c.n}% del sector`; ok = seen >= c.n; break;
+      }
+    }
+    const progTxt = c.type === 'stealth' ? `alerta ${prog}%` : c.type === 'intact' ? (ok ? 'intacto' : `${prog} perdidos`) : c.type === 'explore' ? `${prog}%/${c.n}%` : `${Math.min(prog, c.n)}/${c.n}`;
+    return { txt, ok, progTxt, live, reward: `+${c.scrap} ¤${c.frags ? ` · +${c.frags} ◊` : ''}` };
+  },
+
+  // ---------- eventos de radio ----------
+  placeAhead(type, dmin, dmax) {
+    const st = this.st, P = st.plane, map = st.map, R = this.R;
+    for (let k = 0; k < 80; k++) {
+      const h = (P.h + R.int(-1, 1) + 8) % 8, d = R.int(dmin, dmax);
+      const x = clamp(P.x + Math.round(DX[h] * d * 1.2 + R.int(-3, 3)), 3, map.w - 4);
+      const y = clamp(P.y + Math.round(DY[h] * d * 0.8 + R.int(-2, 2)), 3, map.h - 4);
+      const i = y * map.w + x, t = TER[map.t[i]];
+      if (t.block || t.water || t.anom || map.items[i] || map.ground[i] || map.exit.includes(i)) continue;
+      map.items[i] = { type };
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) map.seen[(y + dy) * map.w + x + dx] = 1;
+      return { x, y };
+    }
+    return null;
+  },
+  triggerEvent() {
+    const st = this.st, R = this.R;
+    const pool = [['socorro', 3], ['suministro', 3], ['falsa', 2], ['silencio', st.alert >= 20 ? 3 : 1]];
+    if (Object.keys(st.map.ground).length && st.scrap >= 15) pool.push(['desertor', 2]);
+    st.event = { id: R.weighted(pool) };
+    st.sec.events++;
+    this.log('[RADIO] Transmisión prioritaria entrante...', COL.yellow);
+    Sound.play('alarm');
+  },
+  eventDef(ev) {
+    const st = this.st;
+    const E = {
+      socorro: {
+        title: 'SEÑAL DE SOCORRO',
+        text: 'Una baliza de emergencia: «...aquí Halcón-4, derribado... herido... cualquier aparato soviético...». Un piloto de reconocimiento del OKB está en tierra, no muy lejos de tu rumbo.',
+        opts: [['RESCATARLO', 'Marca su posición @. Vuela bajo y despacio para recogerlo. Te recompensará.'], ['IGNORAR', 'La misión es lo primero.']],
+      },
+      desertor: {
+        title: 'UN DESERTOR',
+        text: 'Una voz nerviosa en una frecuencia civil: «Soy operador de la Dirección K. Tengo las coordenadas de todas las instalaciones del sector. Quince unidades de chatarra en el próximo lanzamiento y son suyas.»',
+        opts: [['PAGAR 15 ¤', 'Revela todas las estaciones de radar, antiaéreos y SAM del sector.'], ['RECHAZAR', 'Quizá avise a sus antiguos jefes...']],
+      },
+      silencio: {
+        title: 'ORDEN DE SILENCIO',
+        text: 'Mando OKB: «Zhuravl, la Dirección K triangula sus emisiones. Apague el radar de a bordo seis turnos y perderán la pista.»',
+        opts: [['APAGAR EL RADAR', 'Alerta −25. Tu radar queda fuera de servicio 6 turnos.'], ['MANTENERLO', 'Prefieres ver lo que se acerca.']],
+      },
+      suministro: {
+        title: 'LANZAMIENTO DE SUMINISTROS',
+        text: 'Un Li-2 del Ministerio cruza el sector a gran altura: «Zhuravl, podemos dejarle caer un contenedor. ¿Qué necesita?»',
+        opts: [['COMBUSTIBLE', 'Un depósito ⌂ cae por delante de tu rumbo.'], ['PIEZAS Y PERTRECHOS', 'Un contenedor ■ con un módulo, una bengala y un kit.']],
+      },
+      falsa: {
+        title: 'FRECUENCIA DESCONOCIDA',
+        text: 'En la banda reservada del OKB suena una señal en bucle: tres pitidos, una pausa, tres pitidos. Nadie del Mando la reconoce.',
+        opts: [['INVESTIGAR', 'Marca el origen ?. Puede ser un hallazgo... o una trampa.'], ['IGNORAR', 'Demasiado conveniente.']],
+      },
+    };
+    return E[ev.id];
+  },
+  resolveEvent(choice) {
+    const st = this.st, R = this.R, map = st.map;
+    const ev = st.event;
+    if (!ev) return;
+    st.event = null;
+    Sound.play('click');
+    switch (ev.id) {
+      case 'socorro':
+        if (choice === 0) { const p = this.placeAhead('survivor', 10, 18); this.log(p ? 'Posición de Halcón-4 marcada en el mapa (@).' : 'La baliza se apaga antes de poder triangularla.', COL.yellow); }
+        else this.log('Dejas atrás la baliza. Nadie lo sabrá nunca.', COL.grey);
+        break;
+      case 'desertor':
+        if (choice === 0 && st.scrap >= 15) {
+          st.scrap -= 15;
+          for (const k in map.ground) { const x = k % map.w, y = (k / map.w) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const i = (y + dy) * map.w + x + dx; if (i >= 0 && i < map.seen.length) map.seen[i] = 1; } }
+          this.log('Coordenadas recibidas: todas las instalaciones enemigas aparecen en tu mapa (M).', COL.yellow);
+        } else if (R.chance(0.4)) { st.alert = Math.min(100, st.alert + 12); this.log('El desertor cumple su amenaza: la Dirección K sabe dónde buscarte.', COL.red); }
+        else this.log('La frecuencia queda en silencio.', COL.grey);
+        break;
+      case 'silencio':
+        if (choice === 0) { st.alert = Math.max(0, st.alert - 25); st.blind = 6; this.log('Radar apagado. Vuelas a ciegas, pero invisible a sus triangulaciones.', COL.yellow); }
+        else this.log('Mantienes el radar encendido.', COL.grey);
+        break;
+      case 'suministro':
+        if (this.placeAhead(choice === 0 ? 'depot' : 'cache', 8, 14)) this.log(choice === 0 ? 'Un depósito ⌂ desciende en paracaídas delante de ti.' : 'Un contenedor ■ desciende en paracaídas delante de ti.', COL.yellow);
+        break;
+      case 'falsa':
+        if (choice === 0) { this.placeAhead('signal', 10, 18); this.log('Origen de la señal marcado (?).', COL.yellow); }
+        else this.log('Cambias de frecuencia.', COL.grey);
+        break;
+    }
     this.save();
   },
 
@@ -277,7 +511,7 @@ const G = {
     const slowOk = P.s <= S.grabLim;
     if (it.type === 'frag') {
       delete map.items[idx];
-      st.frags++; st.stats.frags++; st.score += 100;
+      st.frags++; st.stats.frags++; st.score += 100; st.sec.frags++;
       this.log('Fragmento del Objeto recuperado. ◊ +1', COL.cyan);
       FX.burst(x, y, { n: 22, speed: 5, chars: '◊·+*', cols: [COL.white, COL.cyan, COL.cyan, COL.dcyan], life: 1.1 });
       FX.ring(x, y, 3, COL.cyan);
@@ -292,26 +526,58 @@ const G = {
       Sound.play('warp');
       st.alert = Math.min(100, st.alert + 45);
       for (let k = 0; k < 3; k++) this.spawnEnemy('eco', 'wave');
+    } else if (it.type === 'signal') {
+      delete map.items[idx];
+      if (R.chance(0.55)) {
+        st.frags += 2; st.stats.frags += 2; st.sec.frags += 2; st.score += 200;
+        this.log('La señal procedía de dos fragmentos del Objeto que resuenan entre sí. ◊ +2', COL.cyan);
+        FX.burst(x, y, { n: 30, speed: 6, chars: '◊·+*', cols: [COL.white, COL.cyan, COL.dcyan], life: 1.2 });
+        Sound.play('frag');
+      } else {
+        this.log('¡Emboscada! La señal era un cebo de la Dirección K.', COL.red);
+        for (let k = 0; k < 2; k++) this.spawnEnemy(R.weighted(SECTORS[st.sector].pool), 'wave');
+        st.alert = Math.min(100, st.alert + 15);
+        Sound.play('alarm'); FX.shake(4);
+      }
     } else if (!slowOk) {
       this.hint('grab', `Demasiado rápido para recoger ${ITEMS[it.type].n.toLowerCase()} (velocidad máx. ${S.grabLim}).`);
     } else if (it.type === 'depot') {
       delete map.items[idx];
-      const amt = R.int(20, 34);
+      const amt = R.int(26, 40);
       P.fuel = Math.min(this.calc().fuelCap, P.fuel + amt);
       this.log(`Repostaje en vuelo desde un depósito: +${amt} de combustible.`, COL.yellow);
       FX.burst(x, y, { n: 14, chars: '·°', cols: [COL.yellow, COL.o2, COL.o3], speed: 4 });
       Sound.play('pick');
+    } else if (it.type === 'survivor') {
+      delete map.items[idx];
+      const sc = this.gainScrap(20);
+      st.alert = Math.max(0, st.alert - 15); st.score += 250;
+      st.items.kits++;
+      this.log(`Halcón-4 a bordo. «Le debo una, Zhuravl»: le pasa sus mapas y su botiquín. +${sc} ¤, +1 kit, alerta −15.`, COL.yellow);
+      const r = 14;
+      for (let yy = Math.max(0, y - r); yy < Math.min(map.h, y + r); yy++) for (let xx = Math.max(0, x - r * 2); xx < Math.min(map.w, x + r * 2); xx++) map.seen[yy * map.w + xx] = 1;
+      FX.burst(x, y, { n: 16, chars: '+·', cols: [COL.white, COL.yellow, COL.o2], speed: 4 });
+      Sound.play('land');
+    } else if (it.type === 'cache') {
+      delete map.items[idx];
+      st.items.flares++; st.items.kits++;
+      const m = Gen.module(R, this, { sector: st.sector, bonus: 1 });
+      const free = P.cargo.indexOf(null);
+      if (free >= 0) P.cargo[free] = m; else this.gainScrap(Math.round(m.value / 3));
+      this.log(`Contenedor enganchado: +1 bengala, +1 kit${free >= 0 ? ', ' + modName(m) + ' a la bodega' : ''}.`, COL.yellow);
+      FX.burst(x, y, { n: 14, chars: '■*·', speed: 4 });
+      Sound.play('pick');
     } else if (it.type === 'wreck' || it.type === 'factory') {
       delete map.items[idx];
-      const scrap = R.int(3, 9) + (it.type === 'factory' ? 6 : 0);
-      st.scrap += scrap;
+      const scrap = this.gainScrap(R.int(3, 9) + (it.type === 'factory' ? 6 : 0));
+      if (R.chance(0.15)) { st.items.flares++; this.log('Entre los restos: una caja de bengalas.', COL.yellow); }
       const m = Gen.module(R, this, { sector: st.sector, bonus: it.type === 'factory' ? 1.5 : 0 });
       const free = P.cargo.indexOf(null);
       if (free >= 0) {
         P.cargo[free] = m;
         this.log(`Garfio: ${modName(m)} [${TIERS[m.tier].n}] a la bodega. +${scrap} chatarra.`, COL.o2);
       } else {
-        st.scrap += Math.round(m.value / 3);
+        this.gainScrap(Math.round(m.value / 3));
         this.log(`Bodega llena: ${modName(m)} desguazado en vuelo. +${scrap + Math.round(m.value / 3)} chatarra.`, COL.o3);
       }
       FX.burst(x, y, { n: 12, chars: '%*·', speed: 4 });
@@ -390,7 +656,7 @@ const G = {
 
   playerFire(S) {
     const st = this.st, P = st.plane, R = this.R;
-    if (st.fireMode === 'hold') return;
+    if (st.fireMode === 'hold' || st.evading) return;
     let delay = 0, fired = false;
     for (let i = 0; i < SLOTS.length; i++) {
       const w = P.slots[i];
@@ -404,6 +670,7 @@ const G = {
         cands.sort((a, b) => a.d - b.d);
         tgt = cands[0];
       }
+      if (isCrit(w) && R.chance(0.35)) { this.log(`${modName(w)} se encasquilla.`, COL.yellow); FX.text(P.x, P.y - 1, 'clac', COL.grey); continue; }
       for (let k = 0; k < (w.shots || 1); k++) {
         if (w.ammo != null) { if (w.ammo <= 0) break; w.ammo--; }
         const ch = this.hitChance(w, tgt, S, i);
@@ -443,10 +710,11 @@ const G = {
     e.aware = Math.max(e.aware, 6);
     if (e.hp > 0) return;
     st.enemies = st.enemies.filter(x => x !== e);
-    st.kills++; st.score += def.score; st.scrap += def.scrap;
-    this.log(`${def.n} derribado. +${def.scrap} chatarra.`, COL.o2);
+    st.kills++; st.score += def.score; st.sec.kills++;
+    const sc = this.gainScrap(def.scrap);
+    this.log(`${def.n} derribado. +${sc} chatarra.`, COL.o2);
     FX.explosion(e.x, e.y, def.hp >= 30, delay);
-    FX.text(e.x, e.y - 1, '+' + def.scrap + '¤', COL.o2, delay + 0.2);
+    FX.text(e.x, e.y - 1, '+' + sc + '¤', COL.o2, delay + 0.2);
     Sound.play('boom', delay);
     if (st.targetId === e.id) st.targetId = null;
     // restos al suelo
@@ -461,8 +729,11 @@ const G = {
     gg.g.hp -= dmg;
     if (gg.g.hp > 0) return;
     delete st.map.ground[gg.idx];
-    st.score += def.score; st.scrap += def.scrap; st.stats.ground++;
-    this.log(`${def.n} destruida. +${def.scrap} chatarra.`, COL.o2);
+    st.score += def.score; st.stats.ground++;
+    if (gg.g.type === 'radar') st.sec.radars++;
+    if (gg.g.type === 'sam') st.sec.sams++;
+    const sc = this.gainScrap(def.scrap);
+    this.log(`${def.n} destruida. +${sc} chatarra.`, COL.o2);
     FX.explosion(gg.x, gg.y, true, delay);
     Sound.play('boom', delay);
     if (st.targetId === gg.id) st.targetId = null;
@@ -490,14 +761,17 @@ const G = {
       m.hp -= dmg;
       if (m.hp <= 0) {
         P.slots[pick.i] = null;
-        st.stats.modsLost++;
+        st.stats.modsLost++; st.sec.mods++;
         this.log(`¡${modName(m)} DESTRUIDO por ${src}!`, COL.red);
         FX.explosion(P.x, P.y, false);
         Sound.play('boom');
         const S = this.calc();
         P.fuel = Math.min(P.fuel, S.fuelCap);
         if (m.cat === 'motor' && S.engines === 0) this.log('No quedan motores. El T-0 planea...', COL.red);
-      } else this.log(`${modName(m)} alcanzado por ${src}: −${dmg}.`, COL.o3);
+      } else {
+        this.log(`${modName(m)} alcanzado por ${src}: −${dmg}.`, COL.o3);
+        if (isCrit(m) && m.hp + dmg >= m.maxHp * 0.35) this.log(`AVERÍA: ${modName(m)} en estado crítico (${CRIT_TXT[m.cat]}).`, COL.yellow);
+      }
     }
     if (P.structure <= 0) { P.structure = 0; this.die(`Derribado por ${src}.`); }
   },
@@ -538,6 +812,8 @@ const G = {
       const d = cheb(e.x, e.y, P.x, P.y);
       let sight = def.sight - (P.alt === 0 ? 3 : 0) - (P.alt === 0 && TER[map.t[P.y * map.w + P.x]].forest ? 2 : 0);
       if (this.inStorm(P.x, P.y)) sight = Math.min(sight, 3);
+      if (S.night) sight -= 3;
+      if (st.flare) sight = 0;
       if (d <= sight) e.aware = 6;
       const aware = e.aware > 0 || st.alert >= 50;
       if (e.aware > 0) e.aware--;
@@ -582,7 +858,7 @@ const G = {
           const dd = cheb(e.x, e.y, P.x, P.y);
           if (dd > w.range || !this.arcOk(e.x, e.y, e.h, P.x, P.y, w.arc)) continue;
           for (let k = 0; k < w.shots; k++) {
-            let ch = w.acc - P.s * 4 - S.ecm - Math.max(0, dd - 1) * 3 - (P.alt === 0 ? 20 : 0);
+            let ch = w.acc - P.s * 4 - S.ecm - Math.max(0, dd - 1) * 3 - (P.alt === 0 ? 20 : 0) - (st.evading ? 30 : 0) - (st.flare ? 40 : 0);
             ch = clamp(ch, 5, 95);
             const hit = R.next() * 100 < ch;
             const dmg = R.int(w.dmg[0], w.dmg[1]);
@@ -628,7 +904,7 @@ const G = {
       } else if (gg.g.type === 'aa') {
         const def = GROUND.aa;
         if (d > def.range) continue;
-        let ch = def.acc + (P.alt === 0 ? 25 : 0) - P.s * 4 - S.ecm;
+        let ch = def.acc + (P.alt === 0 ? 25 : 0) - P.s * 4 - S.ecm - (S.night ? 10 : 0) - (st.evading ? 30 : 0) - (st.flare ? 40 : 0);
         ch = clamp(ch, 5, 90);
         const hit = R.next() * 100 < ch;
         const dmg = R.int(def.dmg[0], def.dmg[1]);
@@ -639,6 +915,23 @@ const G = {
         Sound.play('shot', dl);
         delay += 0.12;
         if (hit) { this.damagePlayer(dmg, 'fuego antiaéreo'); if (st.phase !== 'flight') return; }
+      } else if (gg.g.type === 'sam') {
+        const def = GROUND.sam;
+        if (gg.g.cd > 0) { gg.g.cd--; continue; }
+        if (P.alt !== 1 || d > def.range) continue;
+        gg.g.cd = def.reload;
+        let ch = def.acc - P.s * 4 - S.ecm - (st.evading ? 30 : 0) - (st.flare ? 40 : 0);
+        ch = clamp(ch, 5, 90);
+        const hit = R.next() * 100 < ch;
+        const dmg = R.int(def.dmg[0], def.dmg[1]);
+        const ox = P.x + (hit ? 0 : (Math.random() - 0.5) * 4), oy = P.y + (hit ? 0 : (Math.random() - 0.5) * 4);
+        const dl = delay;
+        FX.proj(gg.x, gg.y, ox, oy, { delay: dl, dur: 0.55, col: COL.white, ch: '•', smoke: true, onEnd: () => FX.burst(ox, oy, { n: hit ? 16 : 8, speed: 5, life: 0.7 }) });
+        Sound.play('rocket', dl);
+        if (!gg.g.warned) { gg.g.warned = 1; this.log('¡Lanzamiento de misil! Un SAM Ψ te tiene en el punto de mira. Baja de altitud.', COL.red); }
+        delay += 0.3;
+        if (hit) { this.damagePlayer(dmg, 'un misil SAM'); if (st.phase !== 'flight') return; }
+        else this.log('El misil pasa de largo.', COL.grey);
       }
     }
     this.lock = Math.max(this.lock, performance.now() + delay * 1000);
@@ -660,7 +953,8 @@ const G = {
   environment(S) {
     const st = this.st, P = st.plane, R = this.R, map = st.map;
     for (const s of map.storms) {
-      s.x += s.vx; s.y += s.vy;
+      s.x += s.vx + (st.wind ? DX[st.wind.d] * 0.2 * st.wind.s : 0); s.y += s.vy + (st.wind ? DY[st.wind.d] * 0.15 * st.wind.s : 0);
+      s.x = clamp(s.x, 6, map.w - 6); s.y = clamp(s.y, 3, map.h - 3);
       if (s.x < 8 || s.x > map.w - 8) s.vx *= -1;
       if (s.y < 4 || s.y > map.h - 4) s.vy *= -1;
     }
@@ -711,6 +1005,15 @@ const G = {
   land() {
     const st = this.st, P = st.plane;
     st.score += 300;
+    const ci = this.contractInfo();
+    if (ci && st.contract && !st.contract.paid) {
+      st.contract.paid = true;
+      if (ci.ok) {
+        st.scrap += st.contract.scrap; st.frags += st.contract.frags; st.score += 200;
+        st.contract.result = 'ok';
+        this.log(`Encargo del Ministerio cumplido: ${ci.reward}.`, COL.green);
+      } else { st.contract.result = 'fail'; this.log('Encargo del Ministerio no cumplido.', COL.grey); }
+    }
     Sound.play('land');
     FX.burst(P.x, P.y, { n: 20, chars: '·°', cols: [COL.white, COL.grey], speed: 4 });
     if (SECTORS[st.sector].nucleo) {
@@ -757,8 +1060,58 @@ const G = {
     const an = Gen.module(R, this, { sector: st.sector + 1, tier: 4 });
     an.fragPrice = 2 + Math.floor(st.sector / 2);
     shop.push(an);
-    st.hangar = { name: SECTORS[st.sector].field, reserve: R.int(30, 55), shop };
+    const disc = st.perks.includes('contrabandista') ? 0.75 : 1;
+    for (const m of shop) if (m.price) m.price = Math.round(m.price * disc);
+    const avail = Object.keys(PERKS).filter(k => !st.perks.includes(k));
+    R.shuffle(avail);
+    st.hangar = { name: SECTORS[st.sector].field, reserve: R.int(30, 55), shop, perkChoices: avail.slice(0, 3), contract: st.contract };
     this.save();
+  },
+  priceMul() { return this.st.perks.includes('contrabandista') ? 0.75 : 1; },
+  choosePerk(k) {
+    const st = this.st, P = st.plane;
+    if (!st.hangar || !st.hangar.perkChoices || !st.hangar.perkChoices.includes(k)) return;
+    st.perks.push(k);
+    st.hangar.perkChoices = null;
+    if (k === 'estibador') P.cargo.push(null, null);
+    if (k === 'temple') { P.maxStructure += 25; P.structure += 25; }
+    this.log(`Nuevo talento: ${PERKS[k].n}.`, COL.yellow);
+    Sound.play('frag');
+    this.save();
+  },
+  consumablePrice(k) { return Math.round(CONSUMABLES[k].price * this.priceMul()); },
+  buyConsumable(k) {
+    const st = this.st, p = this.consumablePrice(k);
+    if (st.scrap < p) { Sound.play('deny'); return false; }
+    st.scrap -= p; st.items[k]++;
+    Sound.play('pick');
+    this.save();
+    return true;
+  },
+  upgradeCost(m) {
+    if (!m || m.anom || m.tier >= 3) return null;
+    return Math.round([12, 22, 36][m.tier] * this.priceMul());
+  },
+  upgrade(src) {
+    const st = this.st, m = this.getMod(src), cost = this.upgradeCost(m);
+    if (cost == null || st.scrap < cost || src.from === 'shop') { Sound.play('deny'); return false; }
+    st.scrap -= cost;
+    const r = TIERS[m.tier + 1].mult / TIERS[m.tier].mult;
+    if (m.thrust) m.thrust = Math.round(m.thrust * r * 10) / 10;
+    if (m.cons) m.cons = Math.round(m.cons * 0.95 * 100) / 100;
+    if (m.cap) m.cap = Math.round(m.cap * r);
+    if (m.dmg) { m.dmg = [Math.round(m.dmg[0] * r) || 1, Math.max(Math.round(m.dmg[1] * r), Math.round(m.dmg[0] * r) || 1)]; m.acc += 5; }
+    if (m.maxAmmo && m.tier + 1 >= 3) { m.maxAmmo += 2; m.ammo += 2; }
+    if (m.sys) for (const k in m.sys) if (!['man', 'grab', 'burner', 'repair'].includes(k)) m.sys[k] = Math.round(m.sys[k] * r);
+    const gain = Math.round(m.maxHp * (m.cat === 'blindaje' ? r - 1 : 0.1));
+    m.maxHp += gain; m.hp = Math.min(m.maxHp, m.hp + gain);
+    if (m.tier === 0) m.quirks = m.quirks.filter(q => QUIRKS[q].good);
+    m.tier++;
+    m.value = Math.round(m.value * 1.4);
+    this.log(`Taller: ${modName(m)} mejorado a ${TIERS[m.tier].n}.`, COL.o2);
+    Sound.play('land');
+    this.save();
+    return true;
   },
 
   repairCost() {

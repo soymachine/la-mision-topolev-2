@@ -94,6 +94,25 @@
 - [x] 9.2 `.nojekyll` y rutas relativas para GitHub Pages
 - [x] 9.3 Commit y push a la rama de desarrollo
 
+## Fase 10 — Ratón y zoom (iteración 2)
+- [ ] 10.1 Celdas grandes 2×2 en el terminal (render diferencial compatible) y fuente doble
+- [ ] 10.2 Zoom ×1 / ×2 del mapa (tecla Z, rueda del ratón, botón), capa de efectos escalada
+- [ ] 10.3 Paneo del mapa con botón central (y arrastre izquierdo en zona vacía), botón/tecla C para centrar
+- [ ] 10.4 Barra de acciones clicable sobre el mapa (ejecutar, altitud, evasiva, bengala, kit, zoom, centrar)
+
+## Fase 11 — 10 mejoras de profundidad
+- [ ] 11.1 Talentos del piloto: elegir 1 de 3 en cada hangar (10 talentos)
+- [ ] 11.2 Maniobra evasiva «tonel»: −30% precisión enemiga ese turno, no disparas, cuesta combustible, enfriamiento
+- [ ] 11.3 Encargos del Ministerio: objetivo secundario procedural por sector con recompensa
+- [ ] 11.4 Eventos de radio con decisiones (socorro, desertor, silencio de radio, suministros, frecuencia falsa)
+- [ ] 11.5 Averías críticas: módulos por debajo del 35% fallan (motor, arma encasquillada, fuga, sistema caído)
+- [ ] 11.6 Viento por sector: a favor ahorra combustible, en contra lo gasta; arrastra las tormentas
+- [ ] 11.7 Ciclo día/noche: de noche menos visión propia y enemiga, antiaéreos menos precisos
+- [ ] 11.8 Taller del hangar: mejorar la calidad de un módulo con chatarra
+- [ ] 11.9 Lanzamisiles SAM «Ψ»: largo alcance, solo contra altitud alta, recarga
+- [ ] 11.10 Consumibles: bengalas (rompen el blocaje) y kits de reparación; compra en hangar
+- [ ] 11.11 Instrucciones actualizadas, migración de partidas guardadas, pruebas
+
 ## Ideas futuras (no imprescindibles)
 - [ ] Música ambiental generativa
 - [ ] Más tipos de enemigos y eventos de radio con decisiones

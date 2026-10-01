@@ -45,6 +45,7 @@ function modTip(m, slotIdx) {
   if (m.price != null) L.push(`{y}Precio: ${m.price} ¤ chatarra{/}`);
   if (m.fragPrice != null) L.push(`{c}Precio: ${m.fragPrice} ◊ fragmentos{/}`);
   if (slotIdx != null) L.push(`{g}Ranura: ${SLOTS[slotIdx].n}{/}`);
+  if (slotIdx != null && m.cat === 'arma' && Screens.cur === Flight) L.push('{g}Su arco de tiro se resalta en el mapa.{/}');
   return { title: modName(m), lines: L, col: TIERS[m.tier].c };
 }
 function hpColor(m) { const f = m.hp / m.maxHp; return f < 0.35 ? COL.red : f < 0.75 ? COL.yellow : COL.o1; }
@@ -444,7 +445,7 @@ const Flight = {
     UI.disabled = false;
 
     // ambiente
-    if (Math.random() < 0.5) FX.parts.push({ x: this.icx + Math.random() * L.map.w, y: this.icy - 1, vx: -0.4, vy: 1 + Math.random() * 0.8, life: 30, max: 30, ch: '·', cols: ['#4a3b2e'], drag: 0, grav: 0, delay: 0, glow: false, snow: true });
+    if (Math.random() < 0.18) FX.parts.push({ x: this.icx + Math.random() * L.map.w, y: this.icy - 1, vx: -0.4, vy: 1 + Math.random() * 0.8, life: 30, max: 30, ch: '·', cols: ['#4a3b2e'], drag: 0, grav: 0, delay: 0, glow: false, snow: true });
     FX.parts = FX.parts.filter(p => !p.snow || p.y < this.icy + L.map.h + 1);
     if (st.phase === 'flight' && Math.random() < dt * (3 + P.s * 5)) FX.trail(P.dx - DX[P.h] * 0.6, P.dy - DY[P.h] * 0.6, P.alt ? COL.o1 : COL.o3);
 
@@ -509,6 +510,19 @@ const Flight = {
       }
       if (map.exit.includes(idx)) { fg = blink(1) ? COL.yellow : '#ffd08a'; }
       Term.put(sx, sy, ch, fg, bg);
+    }
+
+    // arco y alcance del arma bajo el ratón
+    const hs = Panel.hoverSlot, hw = hs >= 0 ? P.slots[hs] : null;
+    if (hw && hw.cat === 'arma') {
+      const arc = hw.ground ? 'T' : G.weaponArc(hw, hs);
+      for (let dy = -hw.range; dy <= hw.range; dy++) for (let dx = -hw.range; dx <= hw.range; dx++) {
+        if (!dx && !dy) continue;
+        const wx = P.x + dx, wy = P.y + dy;
+        if (!G.arcOk(P.x, P.y, P.h, wx, wy, arc)) continue;
+        const sx = ox + wx - cx, sy = oy + wy - cy;
+        if (sx >= ox && sy >= oy && sx < ox + w && sy < oy + h) Term.setBg(sx, sy, blink(1) ? '#3d1c08' : '#33170a');
+      }
     }
 
     // previsualización de maniobras
@@ -742,7 +756,7 @@ const Flight = {
       if (e.hp < e.maxHp) { ctx.fillStyle = COL.dred; ctx.fillRect(px, py + chh - 2, cw, 2); ctx.fillStyle = COL.red; ctx.fillRect(px, py + chh - 2, cw * e.hp / e.maxHp, 2); }
     }
     // objetivo marcado
-    const tgt = st.targetId && (st.enemies.find(e => e.id === st.targetId) || G.groundById(st.targetId));
+    const tgt = st.targetId && (st.enemies.find(e => e.id === st.targetId && G.enemyVisible(e, S)) || G.groundById(st.targetId));
     if (tgt) {
       const [px, py] = toPx(tgt.dx != null ? tgt.dx : tgt.x, tgt.dy != null ? tgt.dy : tgt.y);
       const pulse = 0.5 + 0.5 * Math.sin(t * 8);

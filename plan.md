@@ -86,13 +86,13 @@
 
 ## Fase 8 — Pulido y pruebas
 - [x] 8.1 Prueba automática en Chromium headless (sin errores de consola, capturas)
-- [ ] 8.2 Ajuste de balance básico (combustible, daño, oleadas)
-- [ ] 8.3 Revisión de rendimiento (render diferencial) y de tamaños de pantalla
+- [x] 8.2 Ajuste de balance básico (combustible, daño, oleadas)
+- [x] 8.3 Revisión de rendimiento (render diferencial) y de tamaños de pantalla
 
 ## Fase 9 — Publicación
-- [ ] 9.1 `README.md` con instrucciones de juego y despliegue
-- [ ] 9.2 `.nojekyll` y rutas relativas para GitHub Pages
-- [ ] 9.3 Commit y push a la rama de desarrollo
+- [x] 9.1 `README.md` con instrucciones de juego y despliegue
+- [x] 9.2 `.nojekyll` y rutas relativas para GitHub Pages
+- [x] 9.3 Commit y push a la rama de desarrollo
 
 ## Ideas futuras (no imprescindibles)
 - [ ] Música ambiental generativa

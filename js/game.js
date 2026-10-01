@@ -59,6 +59,11 @@ const G = {
     this.reveal();
     st.phase = 'briefing';
     this.log(`Sector ${st.sector + 1}/5: ${def.name}. Destino: ${def.field} (este).`, COL.o2);
+    if (st.sector === 0) {
+      this.log('Mando OKB: «Zhuravl, ← → para virar, ↑ ↓ para el acelerador, ESPACIO para ejecutar.»', COL.o3);
+      this.log('Mando OKB: «Las flechas del mapa son sus destinos posibles: también puede hacer clic en ellas.»', COL.o3);
+      this.log('Mando OKB: «Para recoger fragmentos ◊ y aterrizar, baje a altitud BAJA con X.»', COL.o3);
+    }
     if (st.sector === 4) this.log('El Núcleo está en el centro del epicentro. Sin él no habrá aterrizaje.', COL.cyan);
     this.save();
   },
@@ -78,7 +83,7 @@ const G = {
   calc() {
     const P = this.st.plane;
     const s = {
-      thrust: 0, cons: 0, fuelCap: 35, mass: 12, man: 1, vision: 0, detect: 0, ecm: 0, aim: 0, reso: 0, repair: 0,
+      thrust: 0, cons: 0, fuelCap: 40, mass: 12, man: 1, vision: 0, detect: 0, ecm: 0, aim: 0, reso: 0, repair: 0,
       stealth: 0, burner: 0, grab: 0, engines: 0, weapons: 0, armor: 0, fountain: 0, regen: 0,
     };
     P.slots.forEach((m, i) => {
@@ -911,7 +916,7 @@ const G = {
 
   cycleTarget() {
     const st = this.st, P = st.plane, S = this.calc();
-    const list = st.enemies.filter(e => this.enemyVisible(e, S)).map(e => ({ id: e.id, d: cheb(P.x, P.y, e.x, e.y) }));
+    const list = st.enemies.filter(e => this.isVisible(e.x, e.y, S)).map(e => ({ id: e.id, d: cheb(P.x, P.y, e.x, e.y) }));
     for (const gg of this.groundList()) if (st.map.seen[gg.idx] && this.isVisible(gg.x, gg.y, S)) list.push({ id: gg.id, d: cheb(P.x, P.y, gg.x, gg.y) });
     if (!list.length) { st.targetId = null; return; }
     list.sort((a, b) => a.d - b.d);

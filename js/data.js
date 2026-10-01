@@ -56,7 +56,7 @@ const ENEMY = {
   yak: { g: 'y', n: 'Caza Yak-K', c: COL.red, hp: 14, spd: 3, man: 2, sight: 9, w: [{ dmg: [2, 4], range: 3, acc: 55, arc: 'F', shots: 1 }], scrap: 9, score: 40, d: 'Caza ligero. Cañón frontal.' },
   mig: { g: 'M', n: 'Interceptor MiG-K', c: COL.red, hp: 22, spd: 4, man: 2, sight: 10, w: [{ dmg: [3, 5], range: 4, acc: 58, arc: 'F', shots: 2 }], scrap: 15, score: 80, smart: true, d: 'Rápido y astuto: evita tu arco frontal.' },
   heavy: { g: 'B', n: 'Cañonero Il-K', c: '#ff5a3a', hp: 40, spd: 2, man: 1, sight: 9, w: [{ dmg: [3, 6], range: 4, acc: 50, arc: 'T', shots: 1 }], scrap: 24, score: 120, d: 'Lento y blindado. Torreta de 360°.' },
-  eco: { g: 'Ф', n: 'Eco', c: COL.purple, hp: 26, spd: 3, man: 3, sight: 12, w: [{ dmg: [4, 7], range: 2, acc: 70, arc: 'T', shots: 1, drain: 4 }], scrap: 12, score: 150, anom: true, d: 'Una sombra del Objeto. Drena combustible al impactar.' },
+  eco: { g: 'Ф', n: 'Eco', c: COL.purple, hp: 26, spd: 3, man: 3, sight: 12, w: [{ dmg: [4, 7], range: 2, acc: 70, arc: 'T', shots: 1, drain: 3 }], scrap: 12, score: 150, anom: true, d: 'Una sombra del Objeto. Drena combustible al impactar.' },
 };
 
 const SECTORS = [
